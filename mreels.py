@@ -227,13 +227,13 @@ def momentum_trans_map(angle_map, dE, E0):
     return np.sqrt(momentum_transfer_par**2 + momentum_transfer_per**2)
 
 
-def radial_integration(slice, slice_centre, r1, r0=0, ringsize=5):
+def radial_integration(frame, slice_centre, r1, r0=0, ringsize=5):
     """Performs radial integration of the slice from slice_centre outwards.
     sums all values where the distance of those values is greater than r0 and inbetween r1 and r1-ringsize.
 
     Parameters
     ----------
-    slice : ndarray
+    frame : ndarray
         A slice of the stack for a specific energy
     slice_centre : tuple
         Coordinates of the centre of the slice
@@ -249,16 +249,16 @@ def radial_integration(slice, slice_centre, r1, r0=0, ringsize=5):
     value
         value of the sum over the integration area
     """
-    offset_y = slice_centre[0]-int(slice.shape[0]/2)
-    offset_x = slice_centre[1]-int(slice.shape[1]/2)
-    y = np.linspace( -int(slice.shape[0]/2) -offset_y,
-                     int(slice.shape[0]/2)+offset_y, slice.shape[0])
-    x = np.linspace( -int(slice.shape[1]/2) -offset_y,
-                     int(slice.shape[1]/2)+offset_y, slice.shape[1])
+    offset_y = slice_centre[0]-int(frame.shape[0]/2)
+    offset_x = slice_centre[1]-int(frame.shape[1]/2)
+    y = np.linspace( -int(frame.shape[0]/2) -offset_y,
+                     int(frame.shape[0]/2)+offset_y, frame.shape[0])
+    x = np.linspace( -int(frame.shape[1]/2) -offset_y,
+                     int(frame.shape[1]/2)+offset_y, frame.shape[1])
     Y, X = np.meshgrid(y, x)
     radii = np.sqrt( (X-offset_x)**2 + (Y-offset_y)**2 )
 
-    integration_area_ring = np.where( radii < r1, np.where( (r1 - ringsize) < radii, slice, 0), 0)
+    integration_area_ring = np.where( radii < r1, np.where( (r1 - ringsize) < radii, frame, 0), 0)
     integration_area = np.where( radii > r0, integration_area_ring, 0)
     integral = np.sum(integration_area)
 
