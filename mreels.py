@@ -5,16 +5,17 @@ from scipy.signal import convolve2d as cv2
 from tqdm import tqdm
 
 #Some physical constants:
-if __name__ == '__main__':
-    electron_voltage = 200e3 #Later setup object defined
-    planck_constant = 6.626e-34
-    electron_mass = 9.109e-31
-    elementary_charge = 1.602e-19
-    speed_limit = 299792458
-    incident_beam_energy = electron_voltage
-    electron_wave_lambda = planck_constant * speed_limit / np.sqrt( (elementary_charge
-                        * electron_voltage)**2+2*elementary_charge
-                        * electron_voltage*electron_mass*speed_limit**2 )
+electron_voltage = 200e3 #Later setup object defined
+planck_constant = 6.626e-34
+electron_mass = 9.109e-31
+elementary_charge = 1.602e-19
+speed_limit = 299792458
+
+incident_beam_energy = electron_voltage
+electron_wave_lambda = planck_constant * speed_limit / np.sqrt( (elementary_charge
+                       * electron_voltage)**2+2*elementary_charge
+                       * electron_voltage*electron_mass*speed_limit**2 )
+electron_wave_k = 2*np.pi / electron_wave_lambda
 
 
 def develop(frame):
@@ -105,14 +106,14 @@ def shift(frame, yshift, xshift):
     ndarray
         The original frame shifted
     """
-    new_frame_shape = ( frame.shape[0].int(abs(yshift)), image.shape[1]+int(abs(xshift)))
+    new_frame_shape = ( frame.shape[0].int(abs(yshift)), frame.shape[1]+int(abs(xshift)))
     new_frame = np.zeros( new_frame_shape )
     new_frame[0:frame.shape[0], 0:frame.shape[1]] = frame
 
     y_corrected_frame = np.roll( new_frame, int(yshift), axis=0)
     corrected_frame = np.roll( y_corrected_frame, int(xshift), axis=1)
 
-    return corrected_frame[0:image.shape[0], 0:image.shape[1]]
+    return corrected_frame[0:frame.shape[0], 0:frame.shape[1]]
 
 
 def get_true_centres(frame, false_centres, leeway=50):
@@ -134,7 +135,6 @@ def get_true_centres(frame, false_centres, leeway=50):
     """
     true_centres = np.array([], dtype=object)
     for i in false_centres:
-        false_centre = i
         part_frame = frame[i[0]-leeway:i[0]+leeway, i[1]-leeway:i[1]+leeway]
         [part_true_y, part_true_x] = np.argwhere(part_frame==part_frame.max())[0]
         [true_y, true_x] = [part_true_y+(i[0]-leeway), part_true_x+(i[1]-leeway)]
@@ -224,7 +224,7 @@ def momentum_trans_map(angle_map, dE, E0):
     char_elec_angle = dE /2 /E0
     mom_trans_par = char_elec_angle*electron_wave_k
     mom_trans_per = angle_map*electron_wave_k
-    return np.sqrt(momentum_transfer_par**2 + momentum_transfer_per**2)
+    return np.sqrt(mom_trans_par**2 + mom_trans_per**2)
 
 
 def radial_integration(frame, slice_centre, r1, r0=0, ringsize=5):
@@ -297,7 +297,7 @@ def radial_integration_stack(stack, stack_centre, r1, r0=0, ringsize=5):
     return(integral)
 
 
-def get_qeels_data(stack, r1, peak, antipeak, ccd_pixel_size, camera_distance,
+def get_qeels_data(stack, r1, peak, anti_peak, ccd_pixel_size, camera_distance,
                     dE, E0, preferred_frame=0, ringsize=5, r0=0):
     """Generates a data set containing a map of intensities per pixel and corresponding momentum and energy axis.
 
@@ -341,7 +341,7 @@ def get_qeels_data(stack, r1, peak, antipeak, ccd_pixel_size, camera_distance,
        Performs radial integration on a stack from stack_centre outwards in only spatial directions.
     """
     false_peaks = [peak, anti_peak]
-    (esize, ysize, xsize) = stack.shape
+    esize = stack.shape[1]
     iterate = range( r0, r1)
     momentum_axis = np.array([])
     intensity_map = np.zeros((len(iterate), esize))
@@ -355,7 +355,7 @@ def get_qeels_data(stack, r1, peak, antipeak, ccd_pixel_size, camera_distance,
     momentum_map = momentum_trans_map( angle_map, dE, E0 )
     index = 0
     for i in tqdm(iterate):
-        momentum_frame_total = radial_integration(stack[preferred_frame], beam_centre,
+        momentum_frame_total = radial_integration(momentum_map[preferred_frame], beam_centre,
                                                   r0, i, ringsize)
         momentum_axis = np.append(momentum_axis, momentum_frame_total)
     for j in tqdm(iterate):
