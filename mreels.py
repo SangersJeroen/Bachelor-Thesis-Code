@@ -364,3 +364,54 @@ def get_qeels_data(stack, r1, peak, anti_peak, ccd_pixel_size, camera_distance,
         index += 1
 
     return intensity_map, momentum_axis
+
+
+class MomentumResolvedDataStack:
+
+    def __init__(self, filename: str) -> None:
+
+        dm4_file = io.dm.fileDM(filename)
+
+        KEY = '.ImageList.2.ImageData.Calibrations.Dimension.'
+        KEY2 = '.ImageList.2.ImageTags.EFTEMSI.Acquisition.'
+
+        self.axis_0_origin = dm4_file.allTags[KEY2+'Start Energy (eV)']
+        self.axis_1_origin = dm4_file.allTags[KEY+'2.Origin']
+        self.axis_2_origin = dm4_file.allTags[KEY+'1.Origin']
+
+        self.axis_0_scale = dm4_file.allTags[KEY2+'Step Size (eV)']
+        self.axis_1_scale = dm4_file.allTags[KEY+'2.Scale']
+        self.axis_2_scale = dm4_file.allTags[KEY+'1.Scale']
+
+        self.axis_0_units = dm4_file.allTags[KEY+'3.Units']
+        self.axis_1_units = dm4_file.allTags[KEY+'2.Units']
+        self.axis_2_units = dm4_file.allTags[KEY+'1.Units']
+
+        self.axis_0_steps = dm4_file.allTags['.ImageList.2.ImageData.Dimensions.3']
+        self.axis_1_steps = dm4_file.allTags['.ImageList.2.ImageData.Dimensions.2']
+        self.axis_2_steps = dm4_file.allTags['.ImageList.2.ImageData.Dimensions.1']
+
+        self.axis_0_end = dm4_file.allTags[KEY2+'End Energy (eV)']
+
+        self.stack = dm4_file.getDataset(0)['data']
+
+    def build_axes(self):
+        self.axis0 = np.linspace(self.axis_0_origin,
+                                 self.axis_0_end,
+                                 self.axis_0_steps)
+        self.axis1 = np.linspace(self.axis_1_origin,
+                                 self.axis_1_scale*self.axis_1_steps,
+                                 self.axis_1_steps)
+        self.axis2 = np.linspace(self.axis_2_origin,
+                                 self.axis_2_scale*self.axis_2_steps,
+                                 self.axis_2_steps)
+
+class ImagingSetup:
+    def __init__(self, dm4_file) -> None:
+        KEY0 = '.ImageList.2.ImageTags.Acquisition.Device.'
+        KEY1 = '.ImageList.2.ImageTags.Microscope Info.'
+
+        self.resolution = dm4_file.allTags[KEY0+'Active Size (pixels)']
+        self.pixelsize = dm4_file.allTags[KEY0+'CCD.Pixel Size (um)']*1e-6
+        self.voltage = dm4_file.allTags[KEY1+'Formatted Voltage']
+        self.distance = dm4_file.allTags[KEY1+'STEM Camera Length']
