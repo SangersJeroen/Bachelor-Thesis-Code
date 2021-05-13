@@ -3,19 +3,7 @@ import numpy as np
 import scipy.fftpack as sfft
 from scipy.signal import convolve2d as cv2
 from tqdm import tqdm
-
-#Some physical constants:
-electron_voltage = 200e3 #Later setup object defined
-planck_constant = 6.626e-34
-electron_mass = 9.109e-31
-elementary_charge = 1.602e-19
-speed_limit = 299792458
-
-incident_beam_energy = electron_voltage
-electron_wave_lambda = planck_constant * speed_limit / np.sqrt( (elementary_charge
-                       * electron_voltage)**2+2*elementary_charge
-                       * electron_voltage*electron_mass*speed_limit**2 )
-electron_wave_k = 2*np.pi / electron_wave_lambda
+import matplotlib.pyplot as plt
 
 
 def develop(frame):
@@ -106,7 +94,7 @@ def shift(frame, yshift, xshift):
     ndarray
         The original frame shifted
     """
-    new_frame_shape = ( frame.shape[0].int(abs(yshift)), frame.shape[1]+int(abs(xshift)))
+    new_frame_shape = ( frame.shape[0]+int(abs(yshift)), frame.shape[1]+int(abs(xshift)))
     new_frame = np.zeros( new_frame_shape )
     new_frame[0:frame.shape[0], 0:frame.shape[1]] = frame
 
@@ -230,7 +218,6 @@ def momentum_trans_map(angle_map, dE, E0):
 def radial_integration(frame, slice_centre, r1, r0=0, ringsize=5):
     """Performs radial integration of the slice from slice_centre outwards.
     sums all values where the distance of those values is greater than r0 and inbetween r1 and r1-ringsize.
-
     Parameters
     ----------
     frame : ndarray
@@ -243,7 +230,6 @@ def radial_integration(frame, slice_centre, r1, r0=0, ringsize=5):
         Thickness of integration ring
     r0 : int, optional
         Inner limit of integration ring, disregarded if r1-ringsize>r0, by default 0
-
     Returns
     -------
     value
@@ -258,9 +244,14 @@ def radial_integration(frame, slice_centre, r1, r0=0, ringsize=5):
     Y, X = np.meshgrid(y, x)
     radii = np.sqrt( (X-offset_x)**2 + (Y-offset_y)**2 )
 
-    integration_area_ring = np.where( radii < r1, np.where( (r1 - ringsize) < radii, frame, 0), 0)
-    integration_area = np.where( radii > r0, integration_area_ring, 0)
-    integral = np.sum(integration_area)
+    integration_area0 = np.where( radii>r0, frame, 0)
+    integration_area1 = np.where( radii<r1, integration_area0, 0)
+    integration_area = np.where( radii>(r1-ringsize), integration_area1, 0)
+
+    entries0 = np.where( radii>r0, 1, 0)
+    entries1 = np.where( radii<r1, entries0, 0)
+    entries = np.where( radii>(r1-ringsize), entries1, 0)
+    integral = np.sum(integration_area) / np.sum(entries)
 
     return integral
 
@@ -269,8 +260,6 @@ def radial_integration_stack(stack, stack_centre, r1, r0=0, ringsize=5):
     """Performs radial integration on a stack from stack_centre outwards in only spatial directions.
     Sums all values where the distance of those values is greater than r0 and inbetween r1 and r1-ringsize.
     Centre is shared for the whole stack so a shift-corrected stack is advised.
-
-
     Parameters
     ----------
     stack : ndarray
@@ -284,86 +273,71 @@ def radial_integration_stack(stack, stack_centre, r1, r0=0, ringsize=5):
     ringsize : int, optional
         Thickness of integration ring, by default 5
     """
-    offset_x = stack_centre[1]-stack.shape[1]/2
-    offset_y = stack_centre[0]-stack.shape[0]/2
-    x = np.linspace(-int(stack.shape[2]/2)-offset_x, int(stack.shape[2]/2)+offset_x, stack.shape[2])
-    y = np.linspace(-int(stack.shape[1]/2)-offset_y, int(stack.shape[1]/2)+offset_y, stack.shape[1])
+    offset_y = stack_centre[0]-int(stack.shape[1]/2)
+    offset_x = stack_centre[1]-int(stack.shape[2]/2)
+    y = np.linspace( -int(stack.shape[1]/2) -offset_y,
+                     int(stack.shape[1]/2)+offset_y, stack.shape[1])
+    x = np.linspace( -int(stack.shape[2]/2) -offset_y,
+                     int(stack.shape[2]/2)+offset_y, stack.shape[2])
     Y, X = np.meshgrid(y, x)
     radii = np.sqrt( (X-offset_x)**2 + (Y-offset_y)**2 )
     radii3d = np.broadcast_to(radii, stack.shape)
 
-    integration_area = np.where( (radii3d>(r1-ringsize)) & (radii3d<r1) & radii3d>r0, stack, 0)
+    integration_area0 = np.where( radii3d>r0, stack, 0)
+    integration_area1 = np.where( radii3d<r1, integration_area0, 0)
+    integration_area = np.where( radii3d>(r1-ringsize), integration_area1, 0)
+
+    entries0 = np.where( radii3d>r0, 1, 0)
+    entries1 = np.where( radii3d<r1, entries0, 0)
+    entries = np.where( radii3d>(r1-ringsize), entries1, 0)
     integral = np.sum( np.sum(integration_area, axis=2), axis=1)
-    return(integral)
+    return integral
 
 
-def get_qeels_data(stack, r1, peak, anti_peak, ccd_pixel_size, camera_distance,
-                    dE, E0, preferred_frame=0, ringsize=5, r0=0):
-    """Generates a data set containing a map of intensities per pixel and corresponding momentum and energy axis.
+def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_frame: int, r0=0):
+    (esize, ysize, xsize) = mr_data_stack.stack.shape
+    iterate = range( r0, r1, ringsize)
+    momentum_qaxis = np.array([])
+    qmap = np.zeros((len(iterate), esize))
 
-    Parameters
-    ----------
-    stack : ndarray
-        Stack containing MREELS values with axis=0 the energy axis, (E, Y, X)
-    r1 : int
-        Outermost diameter of integration
-    peak : tuple
-        Coordinates of a peak (y, x)
-    antipeak : tuple
-        Coordinates of the antipeak corresponding to peak (y, x)
-    ccd_pixel_size : float
-        Size of the physical pixels in the camera, only square pixels supported
-    camera_distance : float
-        Distance between sample and centre pixel in the same units as ccd_pixel_size
-    dE : float
-        Energy step between adjacent slices.
-    E0 : float
-        Energy of the shot electron in keV
-    r0 : int, optional
-        Innermost bound of integration, by default 0
-    preferred_frame : int, optional
-        The frame or slice on which the peaks are to be found, by default 0
-    ringsize : int, optional
-        Thickness of the integration ring, by default 5
+    beam_centre = mr_data_stack.get_centre(preferred_frame)
 
-    Returns
-    -------
-    intensity_map : ndarray
-        Array of size energy x number of integrations, each entry is the sum of all intensities within the integration area
-    momentum_axis : ndarray
-        Array containing the momentum corresponding to the area of integration
+    mr_data_stack.build_axes()
+    mom_y, mom_x = np.meshgrid(mr_data_stack.axis1, mr_data_stack.axis2)
+    momentum_map = np.sqrt(mom_y**2 + mom_x**2)
 
-    See Also
-    --------
-    mreels.radial_integration :
-       Performs radial integration of the slice from slice_centre outwards.
-    mreels.radial_integration_stack :
-       Performs radial integration on a stack from stack_centre outwards in only spatial directions.
-    """
-    false_peaks = [peak, anti_peak]
-    esize = stack.shape[1]
-    iterate = range( r0, r1)
-    momentum_axis = np.array([])
-    intensity_map = np.zeros((len(iterate), esize))
-
-    true_peak_centres = get_true_centres(stack[preferred_frame], false_peaks)
-    true_centre_peak = [true_peak_centres[0], true_peak_centres[1]]
-    true_centre_anti_peak = [true_peak_centres[2], true_peak_centres[3]]
-    beam_centre = get_beam_centre(true_centre_peak, true_centre_anti_peak)
-
-    angle_map = generate_angle_map(stack[0].shape, beam_centre, ccd_pixel_size, camera_distance)
-    momentum_map = momentum_trans_map( angle_map, dE, E0 )
     index = 0
     for i in tqdm(iterate):
-        momentum_frame_total = radial_integration(momentum_map[preferred_frame], beam_centre,
-                                                  r0, i, ringsize)
-        momentum_axis = np.append(momentum_axis, momentum_frame_total)
+        momentum_frame_total = radial_integration(momentum_map, beam_centre, i,ringsize)
+        momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
     for j in tqdm(iterate):
-        intensity = radial_integration_stack(stack, beam_centre, r0, j, ringsize)
-        intensity_map[index,:] = intensity
+        intensity = radial_integration_stack(mr_data_stack.stack, beam_centre, j, r0, ringsize)
+        qmap[index,:] = intensity
         index += 1
+    return qmap, momentum_qaxis
 
-    return intensity_map, momentum_axis
+
+def plot_qeels_data(mr_data: object,
+                    intensity_qmap: np.ndarray, momentum_qaxis: np.ndarray) -> None:
+    plt.close()
+    min_q = momentum_qaxis.min()
+    max_q = momentum_qaxis.max()
+    step_q = (max_q-min_q)/len(momentum_qaxis)
+
+    mr_data.build_axes()
+    e = mr_data.axis0
+    min_e = e.min()
+    max_e = e.max()
+    step_e = (max_e-min_e)/len(e)
+
+    Q, E = np.mgrid[min_q:max_q:step_q, min_e:max_e:step_e]
+    fig, ax = plt.subplots(1,1)
+    c = ax.pcolor(E-0.5*step_e, Q-0.5*step_q, intensity_qmap)
+    ax.set_xlabel(r"Energy [$eV$]")
+    ax.set_ylabel(r"$q^{-1}$ [$\AA^{-1}$]")
+    plt.show()
+
+
 
 
 class MomentumResolvedDataStack:
@@ -394,6 +368,7 @@ class MomentumResolvedDataStack:
         self.axis_0_end = dm4_file.allTags[KEY2+'End Energy (eV)']
 
         self.stack = dm4_file.getDataset(0)['data']
+        self.stack_corrected = None
 
     def build_axes(self):
         self.axis0 = np.linspace(self.axis_0_origin,
@@ -406,12 +381,67 @@ class MomentumResolvedDataStack:
                                  self.axis_2_scale*self.axis_2_steps,
                                  self.axis_2_steps)
 
+    def get_centre(self, index: int) -> tuple:
+        slice = self.stack[index]
+        (y_centre, x_centre) = np.argwhere(slice==slice.max())[0]
+        self.centre = (y_centre, x_centre)
+        return (y_centre, x_centre)
+
+    def correct_drift(self, preferred_frame=0) -> None:
+        stack_copy = np.copy(self.stack)
+        stack_avg = np.average(stack_copy)
+        stack_std = np.std(stack_copy)
+        stack_develop = 1/(1+np.exp(-(stack_copy-stack_avg)/stack_std))
+
+        pref_develop = stack_develop[preferred_frame]
+        pref_fft = sfft.fft2(pref_develop)
+
+        stack_shape = pref_develop.shape
+        self.stack_corrected = np.zeros(self.stack.shape)
+
+        for i in tqdm(range(0, self.axis_0_steps)):
+            current_slice = stack_develop[i]
+            cur_slice_fft = sfft.fft2(current_slice)
+
+            cross_pws = (pref_fft*cur_slice_fft.conj())/np.abs(pref_fft*cur_slice_fft.conj())
+            cross_cor = np.abs(sfft.ifft2(cross_pws))
+            cross_cor = sfft.fftshift(cross_cor)
+
+            [sy, sx] = np.argwhere( cross_cor == cross_cor.max())[0]
+            [sy, sx] = [sy - stack_shape[0]/2, sx - stack_shape[1]/2]
+
+            new_frame_shape = ( stack_shape[0]+int(abs(sy)), stack_shape[1]+int(abs(sx)))
+            new_frame = np.zeros(new_frame_shape)
+            new_frame[0:stack_shape[0], 0:stack_shape[1]] = stack_copy[i]
+
+            y_corrected = np.roll(new_frame, int(sy), axis=0)
+            corrected = np.roll(y_corrected, int(sx), axis=1)
+            self.stack_corrected[i,:,:] = corrected[0:stack_shape[0], 0:stack_shape[1]]
+
+        self.stack = self.stack_corrected
+        self.stack_corrected = None
+        stack_copy = None
+
+
 class ImagingSetup:
-    def __init__(self, dm4_file) -> None:
+    def __init__(self, filename: str ) -> None:
+
+        dm4_file = io.dm.fileDM(filename)
+
         KEY0 = '.ImageList.2.ImageTags.Acquisition.Device.'
         KEY1 = '.ImageList.2.ImageTags.Microscope Info.'
 
         self.resolution = dm4_file.allTags[KEY0+'Active Size (pixels)']
         self.pixelsize = dm4_file.allTags[KEY0+'CCD.Pixel Size (um)']*1e-6
-        self.voltage = dm4_file.allTags[KEY1+'Formatted Voltage']
+        self.voltage = dm4_file.allTags[KEY1+'Voltage']
         self.distance = dm4_file.allTags[KEY1+'STEM Camera Length']
+
+        planck_constant = 6.626e-34
+        electron_mass = 9.109e-31
+        elementary_charge = 1.602e-19
+        speed_limit = 299792458
+
+        electron_wave_lambda = (planck_constant * speed_limit
+                                / np.sqrt( (elementary_charge*self.voltage)**2
+                                +2*elementary_charge*self.voltage*electron_mass*speed_limit**2 ) )
+        self.e_wavenumber = 2*np.pi / electron_wave_lambda
