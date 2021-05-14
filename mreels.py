@@ -4,6 +4,7 @@ import scipy.fftpack as sfft
 from scipy.signal import convolve2d as cv2
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from numba import njit, vectorize, float64, int32
 
 
 def develop(frame):
@@ -215,7 +216,7 @@ def momentum_trans_map(angle_map, dE, E0):
     return np.sqrt(mom_trans_par**2 + mom_trans_per**2)
 
 
-def radial_integration(frame, slice_centre, r1, r0=0, ringsize=5):
+def radial_integration(frame, radii, r1, r0=0, ringsize=5):
     """Performs radial integration of the slice from slice_centre outwards.
     sums all values where the distance of those values is greater than r0 and inbetween r1 and r1-ringsize.
     Parameters
@@ -235,14 +236,6 @@ def radial_integration(frame, slice_centre, r1, r0=0, ringsize=5):
     value
         value of the sum over the integration area
     """
-    offset_y = slice_centre[0]-int(frame.shape[0]/2)
-    offset_x = slice_centre[1]-int(frame.shape[1]/2)
-    y = np.linspace( -int(frame.shape[0]/2) -offset_y,
-                     int(frame.shape[0]/2)+offset_y, frame.shape[0])
-    x = np.linspace( -int(frame.shape[1]/2) -offset_y,
-                     int(frame.shape[1]/2)+offset_y, frame.shape[1])
-    Y, X = np.meshgrid(y, x)
-    radii = np.sqrt( (X-offset_x)**2 + (Y-offset_y)**2 )
 
     integration_area0 = np.where( radii>r0, frame, 0)
     integration_area1 = np.where( radii<r1, integration_area0, 0)
@@ -256,7 +249,9 @@ def radial_integration(frame, slice_centre, r1, r0=0, ringsize=5):
     return integral
 
 
-def radial_integration_stack(stack, stack_centre, r1, r0=0, ringsize=5):
+
+#@vectorize([float64(float64, float64, int32, float64, float64, int32, int32)])
+def radial_integration_stack(stack, radii3d, r1, zeros, ones, r0=0, ringsize=5):
     """Performs radial integration on a stack from stack_centre outwards in only spatial directions.
     Sums all values where the distance of those values is greater than r0 and inbetween r1 and r1-ringsize.
     Centre is shared for the whole stack so a shift-corrected stack is advised.
@@ -273,24 +268,14 @@ def radial_integration_stack(stack, stack_centre, r1, r0=0, ringsize=5):
     ringsize : int, optional
         Thickness of integration ring, by default 5
     """
-    offset_y = stack_centre[0]-int(stack.shape[1]/2)
-    offset_x = stack_centre[1]-int(stack.shape[2]/2)
-    y = np.linspace( -int(stack.shape[1]/2) -offset_y,
-                     int(stack.shape[1]/2)+offset_y, stack.shape[1])
-    x = np.linspace( -int(stack.shape[2]/2) -offset_y,
-                     int(stack.shape[2]/2)+offset_y, stack.shape[2])
-    Y, X = np.meshgrid(y, x)
-    radii = np.sqrt( (X-offset_x)**2 + (Y-offset_y)**2 )
-    radii3d = np.broadcast_to(radii, stack.shape)
+    integration_area0 = np.where( radii3d>r0, stack, zeros)
+    integration_area1 = np.where( radii3d<r1, integration_area0, zeros)
+    integration_area = np.where( radii3d>(r1-ringsize), integration_area1, zeros)
 
-    integration_area0 = np.where( radii3d>r0, stack, 0)
-    integration_area1 = np.where( radii3d<r1, integration_area0, 0)
-    integration_area = np.where( radii3d>(r1-ringsize), integration_area1, 0)
-
-    entries0 = np.where( radii3d>r0, 1, 0)
-    entries1 = np.where( radii3d<r1, entries0, 0)
-    entries = np.where( radii3d>(r1-ringsize), entries1, 0)
-    integral = np.sum( np.sum(integration_area, axis=2), axis=1)
+    entries0 = np.where( radii3d>r0, ones, zeros)
+    entries1 = np.where( radii3d<r1, entries0, zeros)
+    entries = np.where( radii3d>(r1-ringsize), entries1, zeros)
+    integral = np.sum( np.sum(integration_area, axis=2), axis=1) / np.sum( np.sum( entries, axis=2), axis=1)
     return integral
 
 
@@ -300,18 +285,32 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
     momentum_qaxis = np.array([])
     qmap = np.zeros((len(iterate), esize))
 
-    beam_centre = mr_data_stack.get_centre(preferred_frame)
+
 
     mr_data_stack.build_axes()
     mom_y, mom_x = np.meshgrid(mr_data_stack.axis1, mr_data_stack.axis2)
     momentum_map = np.sqrt(mom_y**2 + mom_x**2)
 
+    stack_centre = mr_data_stack.get_centre(preferred_frame)
+
+    offset_y = stack_centre[0]-int(ysize/2)
+    offset_x = stack_centre[1]-int(xsize/2)
+    y = np.linspace( -int(ysize/2) -offset_y,
+                     int(ysize/2)+offset_y, ysize)
+    x = np.linspace( -int(xsize/2) -offset_x,
+                     int(xsize/2)+offset_x, xsize)
+    Y, X = np.meshgrid(y, x)
+    radii = np.sqrt( (X-offset_x)**2 + (Y-offset_y)**2 )
+    radii3d = np.broadcast_to(radii, mr_data_stack.stack.shape)
+    zeros = np.zeros((mr_data_stack.stack.shape), dtype=np.float64)
+    ones = np.ones((mr_data_stack.stack.shape), dtype=np.float64)
+
     index = 0
     for i in tqdm(iterate):
-        momentum_frame_total = radial_integration(momentum_map, beam_centre, i,ringsize)
+        momentum_frame_total = radial_integration(momentum_map, radii, i, r0, ringsize)
         momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
     for j in tqdm(iterate):
-        intensity = radial_integration_stack(mr_data_stack.stack, beam_centre, j, r0, ringsize)
+        intensity = radial_integration_stack(mr_data_stack.stack, radii3d, j, zeros, ones, r0, ringsize)
         qmap[index,:] = intensity
         index += 1
     return qmap, momentum_qaxis
