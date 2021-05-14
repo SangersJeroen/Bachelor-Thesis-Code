@@ -6,6 +6,7 @@ from scipy.signal import convolve2d as cv2
 from scipy.signal import convolve as cv
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 
 def develop(frame):
@@ -256,7 +257,7 @@ def radial_integration(frame, radii, r1, r0=0, ringsize=5):
     return integral
 
 
-def radial_integration_stack(stack, radii3d, r1, zeros, ones, r0=0, ringsize=5):
+def radial_integration_stack(r1, stack, radii3d, zeros, ones, r0=0, ringsize=5):
     """Performs radial integration on a stack from stack_centre outwards in only spatial directions.
     Sums all values where the distance of those values is greater than r0 and inbetween r1 and r1-ringsize.
     Centre is shared for the whole stack so a shift-corrected stack is advised.
@@ -273,6 +274,7 @@ def radial_integration_stack(stack, radii3d, r1, zeros, ones, r0=0, ringsize=5):
     ringsize : int, optional
         Thickness of integration ring, by default 5
     """
+    test = 0
     integration_area = np.where( ((radii3d>r0) & (radii3d<r1)) & (radii3d>(r1-ringsize)), stack, zeros)
 
     entries = np.where(((radii3d>r0) & (radii3d<r1)) & (radii3d>(r1-ringsize)), 1, 0)
@@ -331,14 +333,20 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
 
         iterate = range( r0, r1, ringsize)
         qmap = np.zeros((len(iterate), esize))
-        index = 0
         for i in tqdm(iterate):
             momentum_frame_total = radial_integration(momentum_map, radii, i, r0, ringsize)
             momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
-        for j in tqdm(iterate):
-            intensity = radial_integration_stack(mr_data_stack.stack, radii3d, j*1.0, zeros, ones, r0*1.0, ringsize*1.0)
-            qmap[index,:] = intensity
-            index += 1
+
+        with ThreadPoolExecutor(6) as ex:
+            def part_func(r):
+                args = (mr_data_stack.stack, radii3d, zeros, ones, r0*1.0, ringsize*1.0)
+                return radial_integration_stack(r, *args)
+            r = [i for i in range(r0, r1, ringsize)]
+            results = list(tqdm(ex.map(part_func, r), total=len(r)))
+
+        for i in range(0,len(iterate)):
+            qmap[i] = results[i]
+
 
     elif method == 'line':
         if forward_peak == None:
@@ -380,7 +388,7 @@ def plot_qeels_data(mr_data: object,
     momentum_qaxis = momentum_qaxis[mask]
     min_q = momentum_qaxis.min()
     max_q = momentum_qaxis.max()
-    step_q = (max_q-min_q)/len(momentum_qaxis[1:])
+    step_q = (max_q-min_q)/len(momentum_qaxis)
 
     mr_data.build_axes()
     e = mr_data.axis0
@@ -390,7 +398,7 @@ def plot_qeels_data(mr_data: object,
 
     Q, E = np.mgrid[min_q:max_q:step_q, min_e:max_e:step_e]
     fig, ax = plt.subplots(1,1)
-    c = ax.pcolor(E-0.5*step_e, Q-0.5*step_q, intensity_qmap[1:,:])
+    c = ax.pcolor(E-0.5*step_e, Q-0.5*step_q, intensity_qmap)
     ax.set_xlabel(r"Energy [$eV$]")
     ax.set_ylabel(r"$q^{-1}$ [$\AA^{-1}$]")
     plt.show()
