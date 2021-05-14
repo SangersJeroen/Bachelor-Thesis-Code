@@ -5,7 +5,7 @@ import mreels
 import cProfile
 
 eels_stack = mreels.MomentumResolvedDataStack('n-inse_C1_EFTEM-SI-001 [-3,36] eV.dm4')
-qmap, qaxis = mreels.get_qeels_data(eels_stack, 0, 10, 25, (1509, 991), method='line')
+qmap, qaxis = mreels.get_qeels_data(eels_stack, 400, 5, 25)
 
 mreels.plot_qeels_data(eels_stack, qmap, qaxis)
 

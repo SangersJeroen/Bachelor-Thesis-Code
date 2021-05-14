@@ -275,7 +275,7 @@ def radial_integration_stack(stack, radii3d, r1, zeros, ones, r0=0, ringsize=5):
     """
     integration_area = np.where( ((radii3d>r0) & (radii3d<r1)) & (radii3d>(r1-ringsize)), stack, zeros)
 
-    entries = np.where(((radii3d>r0) & (radii3d<r1)) & (radii3d>(r1-ringsize)), ones, zeros)
+    entries = np.where(((radii3d>r0) & (radii3d<r1)) & (radii3d>(r1-ringsize)), 1, 0)
     integral = np.sum( np.sum(integration_area, axis=2), axis=1) / np.sum( np.sum( entries, axis=2), axis=1)
     return integral
 
@@ -293,7 +293,7 @@ def line_integration_stack(stack: np.ndarray, radii3d: np.ndarray, r1: int, ring
                            zeros: np.ndarray, ones: np.ndarray) -> np.ndarray:
 
     integration_area = np.where((radii3d<r1)&(radii3d>(r1-ringsize)), stack, zeros)
-    entries = np.where((radii3d<r1)&(radii3d>(r1-ringsize)), ones, zeros)
+    entries = np.where((radii3d<r1)&(radii3d>(r1-ringsize)), 1, 0)
     integral = (np.sum( np.sum(integration_area, axis=2), axis=1)
                 / np.sum( np.sum(entries, axis=2), axis=1))
 
@@ -354,7 +354,7 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
         angle_ul = np.arctan(-(stack_centre[1]-ul_vertex[1])/(stack_centre[0]-ul_vertex[0]))
         angle_br = np.arctan(-(stack_centre[1]-br_vertex[1])/(stack_centre[0]-br_vertex[0]))
 
-        r1 = int(np.sqrt( (true_fw_peak[0])**2 + (true_fw_peak[1])**2 )+peak_width)
+        r1 = int(np.sqrt( (true_fw_peak[0]-stack_centre[0])**2 + (true_fw_peak[1]-stack_centre[1])**2 )+peak_width)
 
         stack = np.where( (angles<angle_ul)&(angles>angle_br), mr_data_stack.stack, zeros)
         iterate = range( r0, r1, ringsize)
@@ -375,8 +375,11 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
 def plot_qeels_data(mr_data: object,
                     intensity_qmap: np.ndarray, momentum_qaxis: np.ndarray) -> None:
     plt.close()
-    min_q = momentum_qaxis[1:].min()
-    max_q = momentum_qaxis[1:].max()
+    mask = np.where( np.isnan(momentum_qaxis), False, True)
+    intensity_qmap = intensity_qmap[mask]
+    momentum_qaxis = momentum_qaxis[mask]
+    min_q = momentum_qaxis.min()
+    max_q = momentum_qaxis.max()
     step_q = (max_q-min_q)/len(momentum_qaxis[1:])
 
     mr_data.build_axes()
