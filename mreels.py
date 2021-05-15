@@ -257,7 +257,7 @@ def radial_integration(frame, radii, r1, r0=0, ringsize=5):
     return integral
 
 
-def radial_integration_stack(r1, stack, radii3d, zeros, ones, r0=0, ringsize=5):
+def radial_integration_stack(r1, stack, radii3d, r0=0, ringsize=5):
     """Performs radial integration on a stack from stack_centre outwards in only spatial directions.
     Sums all values where the distance of those values is greater than r0 and inbetween r1 and r1-ringsize.
     Centre is shared for the whole stack so a shift-corrected stack is advised.
@@ -274,8 +274,7 @@ def radial_integration_stack(r1, stack, radii3d, zeros, ones, r0=0, ringsize=5):
     ringsize : int, optional
         Thickness of integration ring, by default 5
     """
-    test = 0
-    integration_area = np.where( ((radii3d>r0) & (radii3d<r1)) & (radii3d>(r1-ringsize)), stack, zeros)
+    integration_area = np.where( ((radii3d>r0) & (radii3d<r1)) & (radii3d>(r1-ringsize)), stack, 0)
 
     entries = np.where(((radii3d>r0) & (radii3d<r1)) & (radii3d>(r1-ringsize)), 1, 0)
     integral = np.sum( np.sum(integration_area, axis=2), axis=1) / np.sum( np.sum( entries, axis=2), axis=1)
@@ -291,15 +290,26 @@ def line_integration(stack: np.ndarray, radii: np.ndarray, r1: int, ringsize: in
     return integral
 
 
-def line_integration_stack(r1: int, stack: np.ndarray, radii3d: np.ndarray, ringsize: int,
-                           zeros: np.ndarray, ones: np.ndarray) -> np.ndarray:
+def line_integration_stack(r1: int, stack: np.ndarray,
+                           radii3d: np.ndarray, ringsize: int) -> np.ndarray:
 
-    integration_area = np.where((radii3d<r1)&(radii3d>(r1-ringsize)), stack, zeros)
+    integration_area = np.where((radii3d<r1)&(radii3d>(r1-ringsize)), stack, 0)
     entries = np.where((radii3d<r1)&(radii3d>(r1-ringsize)), 1, 0)
     integral = (np.sum( np.sum(integration_area, axis=2), axis=1)
                 / np.sum( np.sum(entries, axis=2), axis=1))
 
     return integral
+
+
+def local_norm(image: np.ndarray) -> np.ndarray:
+    a = 1/(4+4*np.sqrt(2))
+    mask = 1/(a*np.array([
+        [1,np.sqrt(2),1],
+        [np.sqrt(2),0,np.sqrt(2)],
+        [1, np.sqrt(2),1]
+    ]))
+    return cv2(image, mask)
+
 
 
 def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_frame: int,
@@ -314,17 +324,15 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
 
     stack_centre = mr_data_stack.get_centre(preferred_frame)
 
-    offset_x = stack_centre[0]-int(ysize/2)
-    offset_y = stack_centre[1]-int(xsize/2)
-    y = np.linspace( -int(ysize/2) -offset_y,
-                     int(ysize/2)+offset_y, ysize)
-    x = np.linspace( -int(xsize/2) -offset_x,
-                     int(xsize/2)+offset_x, xsize)
-    Y, X = np.meshgrid(y, x)
+    offset_y = stack_centre[0]-int(ysize/2)
+    offset_x = stack_centre[1]-int(xsize/2)
+    y = (np.arange(ysize)-ysize/2)
+    x = (np.arange(xsize)-ysize/2)
+    X, Y = np.meshgrid(y, x)
     radii = np.sqrt( (X-offset_x)**2 + (Y-offset_y)**2 )
-    radii3d = np.broadcast_to(radii, mr_data_stack.stack.shape)
-    zeros = np.zeros((mr_data_stack.stack.shape), dtype=np.float64)
-    ones = np.ones((mr_data_stack.stack.shape), dtype=np.float64)
+    radii3d = np.broadcast_to(radii, mr_data_stack.stack.shape).astype('float32')
+    #zeros = np.zeros((mr_data_stack.stack.shape), dtype=np.float32)
+    #ones = np.ones((mr_data_stack.stack.shape), dtype=np.float32)
 
     qmap = None
 
@@ -337,10 +345,10 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
         for i in tqdm(iterate):
             momentum_frame_total = radial_integration(momentum_map, radii, i, r0, ringsize)
             momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
-
+        radii = None
         with ThreadPoolExecutor(threads) as ex:
             def part_func(r):
-                args = (mr_data_stack.stack, radii3d, zeros, ones, r0*1.0, ringsize*1.0)
+                args = (mr_data_stack.stack, radii3d, r0*1.0, ringsize*1.0)
                 return radial_integration_stack(r, *args)
             r = [i for i in range(r0, r1, ringsize)]
             results = list(tqdm(ex.map(part_func, r), total=len(r)))
@@ -358,24 +366,22 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
         peak_width = get_peak_width(mr_data_stack.stack[preferred_frame],
                                     (true_fw_peak[0],true_fw_peak[1]))
         angles = np.arctan((Y-offset_y)/(X-offset_x))
-        ul_vertex = (true_fw_peak[0]+peak_width, true_fw_peak[1]-peak_width)
-        br_vertex = (true_fw_peak[0]-peak_width, true_fw_peak[1]+peak_width)
-        angle_ul = np.arctan(-(stack_centre[1]-ul_vertex[1])/(stack_centre[0]-ul_vertex[0]))
-        angle_br = np.arctan(-(stack_centre[1]-br_vertex[1])/(stack_centre[0]-br_vertex[0]))
+        angle_to_centre = np.arctan((true_fw_peak[0]-stack_centre[0])/(true_fw_peak[1]-stack_centre[1]))
 
         r1 = int(np.sqrt( (true_fw_peak[0]-stack_centre[0])**2 + (true_fw_peak[1]-stack_centre[1])**2 )+peak_width)
+        small_angle = np.abs(np.arctan(np.sqrt(2)*peak_width/r1))
 
-        stack = np.where( (angles<angle_ul)&(angles>angle_br), mr_data_stack.stack, zeros)
+        stack = np.where( (angles<(angle_to_centre+small_angle))&(angles>(angle_to_centre-small_angle)), mr_data_stack.stack, 0)
         iterate = range( r0, r1, ringsize)
         qmap = np.zeros((len(iterate), esize))
         index = 0
         for i in tqdm(iterate):
             momentum_frame_total = line_integration(momentum_map, radii, i, ringsize)
             momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
-
+        radii = None
         with ThreadPoolExecutor(threads) as ex:
             def part_func(r):
-                args = (stack, radii3d, ringsize, zeros, ones)
+                args = (stack, radii3d, ringsize)
                 return line_integration_stack(r, *args)
             r = [i for i in range(r0,r1,ringsize)]
             results = list(tqdm(ex.map(part_func, r), total=len(r)))
@@ -395,11 +401,11 @@ def plot_qeels_data(mr_data: object, intensity_qmap: np.ndarray,
                     momentum_qaxis: np.ndarray, prefix: str) -> None:
     plt.close()
     mask = np.where( np.isnan(momentum_qaxis), False, True)
-    intensity_qmap = sigmoid(intensity_qmap[mask])
-    momentum_qaxis = momentum_qaxis[mask]
-    min_q = momentum_qaxis.min()
-    max_q = momentum_qaxis.max()
-    step_q = (max_q-min_q)/len(momentum_qaxis)
+    qmap = sigmoid(intensity_qmap[mask])
+    qaxis = momentum_qaxis[mask]
+    min_q = qaxis.min()
+    max_q = qaxis.max()
+    step_q = (max_q-min_q)/len(qaxis)
 
     mr_data.build_axes()
     e = mr_data.axis0
@@ -409,7 +415,7 @@ def plot_qeels_data(mr_data: object, intensity_qmap: np.ndarray,
 
     Q, E = np.mgrid[min_q:max_q:step_q, min_e:max_e:step_e]
     fig, ax = plt.subplots(1,1)
-    c = ax.pcolormesh(E-0.5*step_e, Q-0.5*step_q, intensity_qmap, shading='nearest')
+    c = ax.pcolormesh(E-0.5*step_e, Q-0.5*step_q, qmap, shading='nearest')
     plt.gcf().set_size_inches((8,8))
     plt.colorbar(c)
     ax.set_xlabel(r"Energy [$eV$]")
