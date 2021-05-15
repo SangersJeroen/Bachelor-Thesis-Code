@@ -291,7 +291,7 @@ def line_integration(stack: np.ndarray, radii: np.ndarray, r1: int, ringsize: in
     return integral
 
 
-def line_integration_stack(stack: np.ndarray, radii3d: np.ndarray, r1: int, ringsize: int,
+def line_integration_stack(r1: int, stack: np.ndarray, radii3d: np.ndarray, ringsize: int,
                            zeros: np.ndarray, ones: np.ndarray) -> np.ndarray:
 
     integration_area = np.where((radii3d<r1)&(radii3d>(r1-ringsize)), stack, zeros)
@@ -303,7 +303,8 @@ def line_integration_stack(stack: np.ndarray, radii3d: np.ndarray, r1: int, ring
 
 
 def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_frame: int,
-                   forward_peak=None, method='radial', r0=0) -> Tuple[np.ndarray,np.ndarray]:
+                   forward_peak=None, method='radial',
+                   r0=0, threads=2) -> Tuple[np.ndarray,np.ndarray]:
     (esize, ysize, xsize) = mr_data_stack.stack.shape
     momentum_qaxis = np.array([])
 
@@ -337,7 +338,7 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
             momentum_frame_total = radial_integration(momentum_map, radii, i, r0, ringsize)
             momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
 
-        with ThreadPoolExecutor(6) as ex:
+        with ThreadPoolExecutor(threads) as ex:
             def part_func(r):
                 args = (mr_data_stack.stack, radii3d, zeros, ones, r0*1.0, ringsize*1.0)
                 return radial_integration_stack(r, *args)
@@ -371,20 +372,30 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
         for i in tqdm(iterate):
             momentum_frame_total = line_integration(momentum_map, radii, i, ringsize)
             momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
-        for j in tqdm(iterate):
-            intensity = line_integration_stack(stack, radii3d, j, ringsize, zeros, ones)
-            qmap[index,:] = intensity
-            index += 1
+
+        with ThreadPoolExecutor(threads) as ex:
+            def part_func(r):
+                args = (stack, radii3d, ringsize, zeros, ones)
+                return line_integration_stack(r, *args)
+            r = [i for i in range(r0,r1,ringsize)]
+            results = list(tqdm(ex.map(part_func, r), total=len(r)))
+
+        for i in range(0,len(iterate)):
+            qmap[i] = results[i]
 
     return qmap, momentum_qaxis
 
 
+def sigmoid(x: np.ndarray) -> np.ndarray:
+    avg = np.average(x)
+    std = np.std(x)
+    return 1/(1+np.exp(-(x-avg)/std))
 
-def plot_qeels_data(mr_data: object,
-                    intensity_qmap: np.ndarray, momentum_qaxis: np.ndarray) -> None:
+def plot_qeels_data(mr_data: object, intensity_qmap: np.ndarray,
+                    momentum_qaxis: np.ndarray, prefix: str) -> None:
     plt.close()
     mask = np.where( np.isnan(momentum_qaxis), False, True)
-    intensity_qmap = intensity_qmap[mask]
+    intensity_qmap = sigmoid(intensity_qmap[mask])
     momentum_qaxis = momentum_qaxis[mask]
     min_q = momentum_qaxis.min()
     max_q = momentum_qaxis.max()
@@ -398,9 +409,12 @@ def plot_qeels_data(mr_data: object,
 
     Q, E = np.mgrid[min_q:max_q:step_q, min_e:max_e:step_e]
     fig, ax = plt.subplots(1,1)
-    c = ax.pcolor(E-0.5*step_e, Q-0.5*step_q, intensity_qmap)
+    c = ax.pcolormesh(E-0.5*step_e, Q-0.5*step_q, intensity_qmap, shading='nearest')
+    plt.gcf().set_size_inches((8,8))
+    plt.colorbar(c)
     ax.set_xlabel(r"Energy [$eV$]")
     ax.set_ylabel(r"$q^{-1}$ [$\AA^{-1}$]")
+    fig.savefig(prefix+'plot_q[{min_q:.2f}_{max_q:.2f}]_E[{min_e}_{max_e}].pdf'.format(min_q=min_q, max_q=max_q, min_e=min_e, max_e=max_e), format='pdf')
     plt.show()
 
 
