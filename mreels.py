@@ -303,9 +303,9 @@ def line_integration_stack(r1: int, stack: np.ndarray,
 
 def local_norm(image: np.ndarray) -> np.ndarray:
     a = 1/(4+4*np.sqrt(2))
-    mask = 1/(a*np.array([
+    mask = 1/(np.array([
         [1,np.sqrt(2),1],
-        [np.sqrt(2),0,np.sqrt(2)],
+        [np.sqrt(2),0.1,np.sqrt(2)],
         [1, np.sqrt(2),1]
     ]))
     return cv2(image, mask)
@@ -418,13 +418,68 @@ def plot_qeels_data(mr_data: object, intensity_qmap: np.ndarray,
     c = ax.pcolormesh(E-0.5*step_e, Q-0.5*step_q, qmap, shading='nearest')
     plt.gcf().set_size_inches((8,8))
     plt.colorbar(c)
+    plt.title(prefix)
     ax.set_xlabel(r"Energy [$eV$]")
     ax.set_ylabel(r"$q^{-1}$ [$\AA^{-1}$]")
-    fig.savefig(prefix+'plot_q[{min_q:.2f}_{max_q:.2f}]_E[{min_e}_{max_e}].pdf'.format(min_q=min_q, max_q=max_q, min_e=min_e, max_e=max_e), format='pdf')
+    fig.savefig(prefix+'_plot_q[{min_q:.2f}_{max_q:.2f}].pdf'.format(min_q=min_q, max_q=max_q), format='pdf')
     plt.show()
 
 
+def transform_axis(DataStack: object, Setup: object) -> Tuple[np.ndarray, np.ndarray]:
+    DataStack.build_axes()
+    Setup.angle_on_ccd_axis()
+    momentum_y = DataStack.axis1
+    momentum_x = DataStack.axis2
+    k_y_axis = Setup.y_angles / momentum_y
+    k_x_axis = Setup.x_angles / momentum_x
+    omega_axis = DataStack.axis0 / 6.626e-34
+    return omega_axis, k_y_axis, k_x_axis
 
+
+def scat_prob_differential(stack: np.ndarray, omega_axis: np.ndarray,
+                            kyaxis: np.ndarray, kxaxis: np.ndarray) -> np.ndarray:
+    (om_len_or, ky_len_or, kx_len_or) = stack.shape
+    scat_prob_array = np.zeros((om_len_or-1, ky_len_or-1, kx_len_or-1))
+
+    prob_array = stack / np.sum(stack)
+
+    for w in range(om_len_or):
+        scat_prob_array[w,:,:] = ((prob_array[w+1,:,:]-prob_array[w,:,:])
+                                   /(omega_axis[w+1]-omega_axis[w]))
+    for y in range(ky_len_or):
+        scat_prob_array[:,y,:] = ((scat_prob_array[:,y+1,:]-scat_prob_array[:,y,:])
+                                   /(kyaxis[y+1]-kyaxis[y]))
+    for x in range(kx_len_or):
+        scat_prob_array[:,:,x] = ((scat_prob_array[:,:,x]-scat_prob_array[:,:,x])
+                                   /(kxaxis[x+1]-kxaxis[x]))
+    return scat_prob_array
+
+
+def kroger_rhs(kperp, omega, ie, e0):
+    hbar = 6.626e-34
+    e = 1.602e-19
+    c = 299792458
+    a = 1  #sample_thicknes
+    v = 1 #electron speed
+    labda = np.sqrt(kperp**2 - ie*omega**2 / c**2)
+    labda0 = np.sqrt(kperp**2 - e0*omega**2 / c**2)
+    Lplus = labda0*ie + labda*e0*np.tanh(labda*a)
+    Lminus = labda0*ie + labda*e0*(np.cosh(labda*a)/np.sinh(labda*a))
+    beta_sq = v**2 / c**2
+    mu_sq = 1-ie*beta_sq
+    mu_0_sq = 1-e0*beta_sq
+    phi_sq = labda**2 + omega**2 / v**2
+    phi_0_sq = labda0**2 + omega**2 / v**2
+    phi_01_sq = kperp**2+omega**2 /v**2 -(ie-e0)*omega**2 / c**2
+    result = e**2 / np.pi**2 /hbar /v**2 * np.imag(
+             mu_sq*2*a / ie /phi_sq
+             -2*kperp**2 *(ie-e0)**2 / (phi_0_sq**2 * phi_sq**2)*(
+                 phi_01_sq**2 /ie /e0 * (np.sin(omega*a/v)**2 / Lplus + np.cos(omega*a/v)**2 /Lminus)
+             +beta_sq*labda0 /e0 *omega /v *phi_01_sq*(1/Lplus + 1/Lminus)*np.sin(2*omega*a/v)
+             -beta_sq**2 *omega**2 /v**2 *labda*labda0*(np.tanh(labda*a)*np.cos(omega*a/v)**2 /Lplus + np.cosh(labda*a)/np.sinh(labda*a)*np.sin(omega*a/v)**2 /Lminus)
+             )
+    )
+    return result
 
 class MomentumResolvedDataStack:
 
@@ -516,7 +571,7 @@ class ImagingSetup:
         self.resolution = dm4_file.allTags[KEY0+'Active Size (pixels)']
         self.pixelsize = dm4_file.allTags[KEY0+'CCD.Pixel Size (um)']*1e-6
         self.voltage = dm4_file.allTags[KEY1+'Voltage']
-        self.distance = dm4_file.allTags[KEY1+'STEM Camera Length']
+        self.distance = dm4_file.allTags[KEY1+'STEM Camera Length']*0.1
 
         planck_constant = 6.626e-34
         electron_mass = 9.109e-31
@@ -527,3 +582,13 @@ class ImagingSetup:
                                 / np.sqrt( (elementary_charge*self.voltage)**2
                                 +2*elementary_charge*self.voltage*electron_mass*speed_limit**2 ) )
         self.e_wavenumber = 2*np.pi / electron_wave_lambda
+
+    def angle_on_ccd_axis(self):
+        pixels_x = np.arange(self.resolution[1])-self.resolution[1]
+        pixels_y = np.arange(self.resolution[0])-self.resolution[0]
+        dist_x = pixels_x * self.pixelsize[1]
+        dist_y = pixels_y * self.pixelsize[0]
+        angles_x = np.arctan(dist_x / self.distance)
+        angles_y = np.arctan(dist_y / self.distance)
+        self.x_angles = angles_x
+        self.y_angles = angles_y
