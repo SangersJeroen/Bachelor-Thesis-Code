@@ -436,23 +436,56 @@ def transform_axis(DataStack: object, Setup: object) -> Tuple[np.ndarray, np.nda
     return omega_axis, k_y_axis, k_x_axis
 
 
-def scat_prob_differential(stack: np.ndarray, omega_axis: np.ndarray,
-                            kyaxis: np.ndarray, kxaxis: np.ndarray) -> np.ndarray:
+def angle_map(setup: object) -> np.ndarray:
+    pixels_x = np.arange(setup.resolution[1])-setup.resolution[1]
+    pixels_y = np.arange(setup.resolution[0])-setup.resolution[0]
+    PX, PY = np.meshgrid(pixels_x, pixels_y)
+    angles = np.arctan(PY/PX)
+    return angles
+
+
+def ddk(data: np.ndarray, angles: np.ndarray, ky: np.ndarray,
+        kx: np.ndarray) -> Tuple[np.ndarray, np.ndarray,np.ndarray]:
+    dim_0, dim_1, dim_2 = data.shape
+    to_x_diff = data*np.cos(angles)
+    to_y_diff = data*np.sin(angles)
+
+    ddx = np.zeros((dim_0, dim_1, dim_2-2))
+    for i in range(1,dim_2-2):
+        ddx[:,:,i] = ((to_x_diff[:,:,i+1]-to_x_diff[:,:,i-1])/(kx[i+1]-kx[i-1]))
+    kx_new = kx[1:-1]
+
+    ddy = np.zeros((dim_0, dim_1-2, dim_2))
+    for i in range(1,dim_2-2):
+        ddy[:,i,:] = ((to_y_diff[:,i+1,:]-to_y_diff[:,i-1,:])/(ky[i+1]-ky[i-1]))
+    ky_new = ky[1:-1]
+
+    total_diff = np.zeros((dim_0, dim_1-2, dim_2-2))
+    total_diff = ddx[:,1:-1,:] + ddy[:,:,1:-1]
+    return total_diff, ky_new, kx_new
+
+
+
+def scat_prob_differential(stack: np.ndarray, setup: object, omega_axis: np.ndarray,
+                           kyaxis: np.ndarray, kxaxis: np.ndarray) -> np.ndarray:
+
     (om_len_or, ky_len_or, kx_len_or) = stack.shape
-    scat_prob_array = np.zeros((om_len_or-1, ky_len_or-1, kx_len_or-1))
-
     prob_array = stack / np.sum(stack)
+    ddw_prob_array = np.zeros((om_len_or-1, ky_len_or, kx_len_or))
+    for i in range(om_len_or-1):
+        ddw_prob_array[i,:,:] = ((prob_array[i+1,:,:]-prob_array[i,:,:])
+        /(omega_axis[i+1]-omega_axis[i]))
+    omega_new = omega_axis[:-1]
 
-    for w in range(om_len_or):
-        scat_prob_array[w,:,:] = ((prob_array[w+1,:,:]-prob_array[w,:,:])
-                                   /(omega_axis[w+1]-omega_axis[w]))
-    for y in range(ky_len_or):
-        scat_prob_array[:,y,:] = ((scat_prob_array[:,y+1,:]-scat_prob_array[:,y,:])
-                                   /(kyaxis[y+1]-kyaxis[y]))
-    for x in range(kx_len_or):
-        scat_prob_array[:,:,x] = ((scat_prob_array[:,:,x]-scat_prob_array[:,:,x])
-                                   /(kxaxis[x+1]-kxaxis[x]))
-    return scat_prob_array
+    angles = np.broadcast_to(angle_map(setup), ddw_prob_array.shape)
+    first_diff, ky_new, kx_new = ddk(ddw_prob_array, angles, kyaxis, kxaxis)
+    angles_new = angles[:,1:-1,1:-1]
+    second_diff, ky_new, kx_new = ddk(first_diff, angles_new, ky_new, kx_new)
+
+    return second_diff, omega_new, ky_new, kx_new
+
+
+
 
 
 def kroger_rhs(kperp, omega, ie, e0):
