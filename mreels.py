@@ -1,6 +1,8 @@
 from typing import Tuple
 from ncempy import io
+from numba import guvectorize, vectorize, cuda
 import numpy as np
+from numpy.lib.function_base import gradient
 import scipy.fftpack as sfft
 from scipy.signal import convolve2d as cv2
 from scipy.signal import convolve as cv
@@ -196,7 +198,7 @@ def generate_angle_map(frame_dimensions, beam_centre, ccd_pixel_size, camera_dis
     return angle_map
 
 
-def momentum_trans_map(angle_map, dE, E0):
+def momentum_trans_map(angle_map, dE, E0, e_k):
     """Generates a map momenta transfers per pixel in the ccd
 
     Parameters
@@ -219,8 +221,8 @@ def momentum_trans_map(angle_map, dE, E0):
         Generates a map of angles between centre of zero-loss peak and pixel on ccd
     """
     char_elec_angle = dE /2 /E0
-    mom_trans_par = char_elec_angle*electron_wave_k
-    mom_trans_per = angle_map*electron_wave_k
+    mom_trans_par = char_elec_angle*e_k
+    mom_trans_per = angle_map*e_k
     return np.sqrt(mom_trans_par**2 + mom_trans_per**2)
 
 
@@ -246,12 +248,12 @@ def radial_integration(frame, radii, r1, r0=0, ringsize=5):
     """
 
     integration_area0 = np.where( radii>r0, frame, 0)
-    integration_area1 = np.where( radii<r1, integration_area0, 0)
-    integration_area = np.where( radii>(r1-ringsize), integration_area1, 0)
+    integration_area = np.where( radii<r1, integration_area0, 0)
+    #integration_area = np.where( radii>(r1-ringsize), integration_area1, 0)
 
     entries0 = np.where( radii>r0, 1, 0)
-    entries1 = np.where( radii<r1, entries0, 0)
-    entries = np.where( radii>(r1-ringsize), entries1, 0)
+    entries = np.where( radii<r1, entries0, 0)
+    #entries = np.where( radii>(r1-ringsize), entries1, 0)
     integral = np.sum(integration_area) / np.sum(entries)
 
     return integral
@@ -274,17 +276,17 @@ def radial_integration_stack(r1, stack, radii3d, r0=0, ringsize=5):
     ringsize : int, optional
         Thickness of integration ring, by default 5
     """
-    integration_area = np.where( ((radii3d>r0) & (radii3d<r1)) & (radii3d>(r1-ringsize)), stack, 0)
+    integration_area = np.where( ((radii3d>r0) & (radii3d<r1)), stack, 0)
 
-    entries = np.where(((radii3d>r0) & (radii3d<r1)) & (radii3d>(r1-ringsize)), 1, 0)
+    entries = np.where(((radii3d>r0) & (radii3d<r1)), 1, 0)
     integral = np.sum( np.sum(integration_area, axis=2), axis=1) / np.sum( np.sum( entries, axis=2), axis=1)
     return integral
 
 
 def line_integration(stack: np.ndarray, radii: np.ndarray, r1: int, ringsize: int) -> np.ndarray:
 
-    integration_area = np.where( (radii<r1)&(radii>(r1-ringsize)), stack, 0)
-    entries = np.where((radii<r1)&(radii>(r1-ringsize)), 1, 0)
+    integration_area = np.where( (radii<r1), stack, 0)
+    entries = np.where((radii<r1), 1, 0)
     integral = np.sum(integration_area)/np.sum(entries)
 
     return integral
@@ -293,8 +295,8 @@ def line_integration(stack: np.ndarray, radii: np.ndarray, r1: int, ringsize: in
 def line_integration_stack(r1: int, stack: np.ndarray,
                            radii3d: np.ndarray, ringsize: int) -> np.ndarray:
 
-    integration_area = np.where((radii3d<r1)&(radii3d>(r1-ringsize)), stack, 0)
-    entries = np.where((radii3d<r1)&(radii3d>(r1-ringsize)), 1, 0)
+    integration_area = np.where((radii3d<r1), stack, 0)
+    entries = np.where((radii3d<r1), 1, 0)
     integral = (np.sum( np.sum(integration_area, axis=2), axis=1)
                 / np.sum( np.sum(entries, axis=2), axis=1))
 
@@ -365,11 +367,11 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
                                         ((forward_peak[0],forward_peak[1]),(forward_peak[0],forward_peak[1])), leeway=50)
         peak_width = get_peak_width(mr_data_stack.stack[preferred_frame],
                                     (true_fw_peak[0],true_fw_peak[1]))
-        angles = np.arctan((Y-offset_y)/(X-offset_x))
-        angle_to_centre = np.arctan((true_fw_peak[0]-stack_centre[0])/(true_fw_peak[1]-stack_centre[1]))
+        angles = np.arctan2((Y-offset_y),(X-offset_x))
+        angle_to_centre = np.arctan2((true_fw_peak[0]-stack_centre[0]),(true_fw_peak[1]-stack_centre[1]))
 
         r1 = int(np.sqrt( (true_fw_peak[0]-stack_centre[0])**2 + (true_fw_peak[1]-stack_centre[1])**2 )+peak_width)
-        small_angle = np.abs(np.arctan(np.sqrt(2)*peak_width/r1))
+        small_angle = np.abs(np.arctan2(np.sqrt(2)*peak_width,r1))
 
         stack = np.where( (angles<(angle_to_centre+small_angle))&(angles>(angle_to_centre-small_angle)), mr_data_stack.stack, 0)
         iterate = range( r0, r1, ringsize)
@@ -415,7 +417,7 @@ def plot_qeels_data(mr_data: object, intensity_qmap: np.ndarray,
 
     Q, E = np.mgrid[min_q:max_q:step_q, min_e:max_e:step_e]
     fig, ax = plt.subplots(1,1)
-    c = ax.pcolormesh(E-0.5*step_e, Q-0.5*step_q, qmap, shading='nearest')
+    c = ax.pcolormesh(e, qaxis, qmap, shading='nearest')
     plt.gcf().set_size_inches((8,8))
     plt.colorbar(c)
     plt.title(prefix)
@@ -437,82 +439,20 @@ def transform_axis(DataStack: object, Setup: object) -> Tuple[np.ndarray, np.nda
 
 
 def angle_map(setup: object) -> np.ndarray:
-    pixels_x = np.arange(setup.resolution[1])-setup.resolution[1]
-    pixels_y = np.arange(setup.resolution[0])-setup.resolution[0]
+    pixels_x = np.arange(setup.resolution[1])-setup.resolution[1]/2+0.5
+    pixels_y = np.arange(setup.resolution[0])-setup.resolution[0]/2+0.5
     PX, PY = np.meshgrid(pixels_x, pixels_y)
-    angles = np.arctan(PY/PX)
+    angles = np.arctan2(PY,PX)
     return angles
 
 
-def ddk(data: np.ndarray, angles: np.ndarray, ky: np.ndarray,
-        kx: np.ndarray) -> Tuple[np.ndarray, np.ndarray,np.ndarray]:
-    dim_0, dim_1, dim_2 = data.shape
-    to_x_diff = data*np.cos(angles)
-    to_y_diff = data*np.sin(angles)
+def scat_prob_differential(qmap: np.ndarray, qaxis: np.ndarray,
+                           eaxis: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    dE = np.gradient(qmap, eaxis, axis=1)
+    dEdQ = np.gradient(dE, qaxis, axis=0)
+    dEdQdQ = np.gradient(dEdQ, qaxis, axis=0)
+    return dEdQdQ[2:-2,2:-2], qaxis[2:-2], eaxis[2:-2]
 
-    ddx = np.zeros((dim_0, dim_1, dim_2-2))
-    for i in range(1,dim_2-2):
-        ddx[:,:,i] = ((to_x_diff[:,:,i+1]-to_x_diff[:,:,i-1])/(kx[i+1]-kx[i-1]))
-    kx_new = kx[1:-1]
-
-    ddy = np.zeros((dim_0, dim_1-2, dim_2))
-    for i in range(1,dim_2-2):
-        ddy[:,i,:] = ((to_y_diff[:,i+1,:]-to_y_diff[:,i-1,:])/(ky[i+1]-ky[i-1]))
-    ky_new = ky[1:-1]
-
-    total_diff = np.zeros((dim_0, dim_1-2, dim_2-2))
-    total_diff = ddx[:,1:-1,:] + ddy[:,:,1:-1]
-    return total_diff, ky_new, kx_new
-
-
-
-def scat_prob_differential(stack: np.ndarray, setup: object, omega_axis: np.ndarray,
-                           kyaxis: np.ndarray, kxaxis: np.ndarray) -> np.ndarray:
-
-    (om_len_or, ky_len_or, kx_len_or) = stack.shape
-    prob_array = stack / np.sum(stack)
-    ddw_prob_array = np.zeros((om_len_or-1, ky_len_or, kx_len_or))
-    for i in range(om_len_or-1):
-        ddw_prob_array[i,:,:] = ((prob_array[i+1,:,:]-prob_array[i,:,:])
-        /(omega_axis[i+1]-omega_axis[i]))
-    omega_new = omega_axis[:-1]
-
-    angles = np.broadcast_to(angle_map(setup), ddw_prob_array.shape)
-    first_diff, ky_new, kx_new = ddk(ddw_prob_array, angles, kyaxis, kxaxis)
-    angles_new = angles[:,1:-1,1:-1]
-    second_diff, ky_new, kx_new = ddk(first_diff, angles_new, ky_new, kx_new)
-
-    return second_diff, omega_new, ky_new, kx_new
-
-
-
-
-
-def kroger_rhs(kperp, omega, ie, e0):
-    hbar = 6.626e-34
-    e = 1.602e-19
-    c = 299792458
-    a = 1  #sample_thicknes
-    v = 1 #electron speed
-    labda = np.sqrt(kperp**2 - ie*omega**2 / c**2)
-    labda0 = np.sqrt(kperp**2 - e0*omega**2 / c**2)
-    Lplus = labda0*ie + labda*e0*np.tanh(labda*a)
-    Lminus = labda0*ie + labda*e0*(np.cosh(labda*a)/np.sinh(labda*a))
-    beta_sq = v**2 / c**2
-    mu_sq = 1-ie*beta_sq
-    mu_0_sq = 1-e0*beta_sq
-    phi_sq = labda**2 + omega**2 / v**2
-    phi_0_sq = labda0**2 + omega**2 / v**2
-    phi_01_sq = kperp**2+omega**2 /v**2 -(ie-e0)*omega**2 / c**2
-    result = e**2 / np.pi**2 /hbar /v**2 * np.imag(
-             mu_sq*2*a / ie /phi_sq
-             -2*kperp**2 *(ie-e0)**2 / (phi_0_sq**2 * phi_sq**2)*(
-                 phi_01_sq**2 /ie /e0 * (np.sin(omega*a/v)**2 / Lplus + np.cos(omega*a/v)**2 /Lminus)
-             +beta_sq*labda0 /e0 *omega /v *phi_01_sq*(1/Lplus + 1/Lminus)*np.sin(2*omega*a/v)
-             -beta_sq**2 *omega**2 /v**2 *labda*labda0*(np.tanh(labda*a)*np.cos(omega*a/v)**2 /Lplus + np.cosh(labda*a)/np.sinh(labda*a)*np.sin(omega*a/v)**2 /Lminus)
-             )
-    )
-    return result
 
 class MomentumResolvedDataStack:
 
@@ -548,8 +488,8 @@ class MomentumResolvedDataStack:
         self.axis0 = np.linspace(self.axis_0_origin,
                                  self.axis_0_end,
                                  self.axis_0_steps)
-        self.axis1 = (np.arange(self.axis_1_steps)-self.axis_1_steps/2)*self.axis_1_scale
-        self.axis2 = (np.arange(self.axis_2_steps)-self.axis_2_steps/2)*self.axis_2_scale
+        self.axis1 = (np.arange(self.axis_1_steps)-self.axis_1_steps/2+0.5)*self.axis_1_scale
+        self.axis2 = (np.arange(self.axis_2_steps)-self.axis_2_steps/2+0.5)*self.axis_2_scale
 
     def get_centre(self, index: int) -> tuple:
         slice = self.stack[index]
@@ -621,7 +561,7 @@ class ImagingSetup:
         pixels_y = np.arange(self.resolution[0])-self.resolution[0]
         dist_x = pixels_x * self.pixelsize[1]
         dist_y = pixels_y * self.pixelsize[0]
-        angles_x = np.arctan(dist_x / self.distance)
-        angles_y = np.arctan(dist_y / self.distance)
+        angles_x = np.arctan2(dist_x , self.distance)
+        angles_y = np.arctan2(dist_y , self.distance)
         self.x_angles = angles_x
         self.y_angles = angles_y

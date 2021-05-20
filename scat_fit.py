@@ -8,6 +8,6 @@ if __name__ == "__main__":
     datastack.correct_drift(25)
     datastack.build_axes()
     omega, ky, kx = mreels.transform_axis(datastack, im_setup)
-    scat_prob, omega, ky, kx = mreels.scat_prob_differential(datastack.stack, im_setup, omega, ky, kx)
+    scat_prob, omega, ky, kx = mreels.scat_prob_differential(datastack.stack, omega, ky, kx)
 
     test = True
