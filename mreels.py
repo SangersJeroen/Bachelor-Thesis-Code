@@ -1,14 +1,19 @@
+from concurrent.futures.thread import BrokenThreadPool
 from typing import Tuple
 from ncempy import io
-from numba import guvectorize, vectorize, cuda
 import numpy as np
 from numpy.lib.function_base import gradient
 import scipy.fftpack as sfft
 from scipy.signal import convolve2d as cv2
-from scipy.signal import convolve as cv
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+
+
+c = 299792458
+hbar = 6.626e-34
+electron_mass = 9.109e-31
+e_charge = 1.602e-19
 
 
 def develop(frame):
@@ -303,7 +308,7 @@ def line_integration_stack(r1: int, stack: np.ndarray,
     return integral
 
 
-def local_norm(image: np.ndarray) -> np.ndarray:
+""" def local_norm(image: np.ndarray) -> np.ndarray:
     a = 1/(4+4*np.sqrt(2))
     mask = 1/(np.array([
         [1,np.sqrt(2),1],
@@ -311,7 +316,7 @@ def local_norm(image: np.ndarray) -> np.ndarray:
         [1, np.sqrt(2),1]
     ]))
     return cv2(image, mask)
-
+ """
 
 
 def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_frame: int,
@@ -376,7 +381,6 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
         stack = np.where( (angles<(angle_to_centre+small_angle))&(angles>(angle_to_centre-small_angle)), mr_data_stack.stack, 0)
         iterate = range( r0, r1, ringsize)
         qmap = np.zeros((len(iterate), esize))
-        index = 0
         for i in tqdm(iterate):
             momentum_frame_total = line_integration(momentum_map, radii, i, ringsize)
             momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
@@ -415,7 +419,7 @@ def plot_qeels_data(mr_data: object, intensity_qmap: np.ndarray,
     max_e = e.max()
     step_e = (max_e-min_e)/len(e)
 
-    Q, E = np.mgrid[min_q:max_q:step_q, min_e:max_e:step_e]
+    #Q, E = np.mgrid[min_q:max_q:step_q, min_e:max_e:step_e]
     fig, ax = plt.subplots(1,1)
     c = ax.pcolormesh(e, qaxis, qmap, shading='nearest')
     plt.gcf().set_size_inches((8,8))
@@ -453,6 +457,64 @@ def scat_prob_differential(qmap: np.ndarray, qaxis: np.ndarray,
     dEdQdQ = np.gradient(dEdQ, qaxis, axis=0)
     return dEdQdQ[2:-2,2:-2], qaxis[2:-2], eaxis[2:-2]
 
+
+class KrogerTerms:
+
+    def create_terms(self, ImagingSetup, di_elec_func, omega, kperp, e0, a):
+
+        self.e0 = e0
+        self.a = a
+
+        if self.e0 == None and e0 == None:
+            raise ValueError("Provide e0 for first run")
+        if self.a == None and a == None:
+            raise ValueError('Provide thickness for first run')
+
+        acc_volt = ImagingSetup.voltage
+        self.electron_lambda = (hbar * c / np.sqrt( (e_charge *acc_volt)**2+2*e_charge*acc_volt*electron_mass*c**2 ) )
+
+        self.electron_v = hbar/self.electron_lambda/electron_mass
+        self.beta_sq = self.electron_v**2 / c**2
+        self.labda = np.sqrt(kperp**2 - di_elec_func * omega**2 / c**2)
+        self.labda0 = np.sqrt(kperp**2 - self.e0*omega**2 / c**2)
+        self.mu_sq = 1-di_elec_func*self.beta_sq
+        self.phi_sq = self.labda**2 + omega**2 / self.electron_v
+        self.mu_0_sq = 1-self.e0*self.beta_sq
+        self.phi0_sq = self.labda0**2 + omega**2 / self.electron_v**2
+        self.phi01_sq = kperp**2 + omega**2 / self.electron_v**2 - (di_elec_func + self.e0)*omega**2 / c**2
+        self.Lplus = self.labda0*di_elec_func + self.labda * self.e0 * np.tanh(self.labda*self.a)
+        self.Lmin = self.labda0*di_elec_func + self.labda*self.e0*(np.cosh(self.labda*self.a)/np.sinh(self.labda*self.a))
+
+    def update_terms(self, di_elec_func, omega, kperp):
+        self.labda = np.sqrt(kperp**2 - di_elec_func*omega**2 / c**2)
+        self.mu_sq = 1-di_elec_func*self.beta_sq
+        self.phi_sq = self.labda**2 + omega**2 / self.electron_v
+        self.phi01_sq = kperp**2 + omega**2 / self.electron_v**2 - (di_elec_func + self.e0)*omega**2 / c**2
+        self.Lplus = self.labda0*di_elec_func + self.labda * self.e0 * np.tanh(self.labda*self.a)
+        self.Lmin = self.labda0*di_elec_func + self.labda*self.e0*(
+                    np.cosh(self.labda*self.a)/np.sinh(self.labda*self.a))
+
+    def bulk_term(self: object, di_elec_func: np.ndarray, omega: int,
+                  kperp: np.ndarray) -> np.ndarray:
+
+        self.update_terms(di_elec_func, omega, kperp)
+        return np.imag(self.mu_sq / di_elec_func /self.phi_sq * self.a*2)
+
+    def prefactor(self: object, di_elec_func: np.ndarray, omega: int,
+                  kperp: np.ndarray) -> np.ndarray:
+
+        self.update_terms(di_elec_func, omega, kperp)
+        return np.imag( -2*kperp**2 * (di_elec_func-self.e0)**2 / self.phi0_sq**2 / self.phi_sq**2)
+
+    def first_correction(self: object, di_elec_func: np.ndarray, omega: int,
+                         kperp: np.ndarray) -> np.ndarray:
+
+        self.update_terms(di_elec_func, omega, kperp)
+        prefactor = self.prefactor(di_elec_func, omega, kperp)
+        inner = (np.sin(omega*self.a / self.electron_v)**2 / self.Lplus
+                 + np.cos(omega*self.a / self.electron_v)**2 / self.Lmin)
+        outer = self.phi01_sq**2 / di_elec_func / self.e0
+        return np.imag( prefactor*outer*inner)
 
 class MomentumResolvedDataStack:
 
