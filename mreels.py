@@ -1,4 +1,3 @@
-from concurrent.futures.thread import BrokenThreadPool
 from typing import Tuple
 from ncempy import io
 import numpy as np
@@ -8,6 +7,7 @@ from scipy.signal import convolve2d as cv2
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from numba import vectorize, float64
 
 
 c = 299792458
@@ -458,6 +458,29 @@ def scat_prob_differential(qmap: np.ndarray, qaxis: np.ndarray,
     return dEdQdQ[2:-2,2:-2], qaxis[2:-2], eaxis[2:-2]
 
 
+def create_guess(KrogerTerms: object, error_map: np.ndarray, old_guess: np.ndarray) -> np.ndarray:
+    pass
+
+
+
+def dif_guesser(scat_prob_slice: np.ndarray, KrogerTerms: object, omega: float):
+    goal = np.copy(scat_prob_slice).ravel()
+    guess = np.random.rand(len(goal))
+
+    if KrogerTerms.a or KrogerTerms.e0 == None:
+        raise RuntimeError('Supply the function with an already initialised KrogerTerms object')
+
+    abs_error = 10
+    while abs_error > 1:
+        pass
+
+
+
+@vectorize([float64(float64, float64)])
+def error_map(target: np.ndarray, attempt: np.ndarray) -> np.ndarray:
+    return target - attempt
+
+
 class KrogerTerms:
 
     def create_terms(self, ImagingSetup, di_elec_func, omega, kperp, e0, a):
@@ -494,19 +517,19 @@ class KrogerTerms:
         self.Lmin = self.labda0*di_elec_func + self.labda*self.e0*(
                     np.cosh(self.labda*self.a)/np.sinh(self.labda*self.a))
 
-    def bulk_term(self: object, di_elec_func: np.ndarray, omega: int,
+    def bulk_term(self: object, di_elec_func: np.ndarray, omega: float,
                   kperp: np.ndarray) -> np.ndarray:
 
         self.update_terms(di_elec_func, omega, kperp)
         return np.imag(self.mu_sq / di_elec_func /self.phi_sq * self.a*2)
 
-    def prefactor(self: object, di_elec_func: np.ndarray, omega: int,
+    def prefactor(self: object, di_elec_func: np.ndarray, omega: float,
                   kperp: np.ndarray) -> np.ndarray:
 
         self.update_terms(di_elec_func, omega, kperp)
         return np.imag( -2*kperp**2 * (di_elec_func-self.e0)**2 / self.phi0_sq**2 / self.phi_sq**2)
 
-    def first_correction(self: object, di_elec_func: np.ndarray, omega: int,
+    def first_correction(self: object, di_elec_func: np.ndarray, omega: float,
                          kperp: np.ndarray) -> np.ndarray:
 
         self.update_terms(di_elec_func, omega, kperp)
@@ -515,6 +538,25 @@ class KrogerTerms:
                  + np.cos(omega*self.a / self.electron_v)**2 / self.Lmin)
         outer = self.phi01_sq**2 / di_elec_func / self.e0
         return np.imag( prefactor*outer*inner)
+
+    def second_correction(self: object, di_elec_func: np.ndarray, omega: float,
+                          kperp: np.ndarray) -> np.ndarray:
+        self.update_terms(di_elec_func, omega, kperp)
+        prefactor = self.prefactor(di_elec_func, omega, kperp)
+        outer = self.beta_sq*self.labda0*omega / self.electron_v /self.e0 * self.phi01_sq
+        inner = (1/self.Lplus - 1/self.Lplus) * np.sin(2*omega*self.a / self.electron_v)
+        return np.imag(prefactor*outer*inner)
+
+    def third_correction(self: object, di_elec_func: np.ndarray, omega: float,
+                         kperp: np.ndarray) -> np.ndarray:
+        self.update_terms(di_elec_func, omega, kperp)
+        prefactor = self.prefactor(di_elec_func, omega, kperp)
+        outer = -self.beta_sq**2 * omega**2 / self.electron_v**2 * self.labda0 * self.labda
+        inner = ((np.cos(omega*self.a / self.electron_v)**2
+                  * np.tanh(self.labda * self.a)/ self.Lplus)
+                  + np.sin(omega*self.a / self.electron_v)**2
+                  * np.cosh(self.labda*self.a)/np.sinh(self.labda*self.a) /self.Lmin)
+        return np.imag(prefactor*outer*inner)
 
 class MomentumResolvedDataStack:
 
