@@ -7,7 +7,7 @@ from scipy.signal import convolve2d as cv2
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from numba import vectorize, float64
+from numba import vectorize, float64, njit
 
 
 c = 299792458
@@ -322,6 +322,7 @@ def line_integration_stack(r1: int, stack: np.ndarray,
 def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_frame: int,
                    forward_peak=None, method='radial',
                    r0=0, threads=2) -> Tuple[np.ndarray,np.ndarray]:
+    #stop counting negative energy values
     (esize, ysize, xsize) = mr_data_stack.stack.shape
     momentum_qaxis = np.array([])
 
