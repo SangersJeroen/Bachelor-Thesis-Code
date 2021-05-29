@@ -293,7 +293,6 @@ def line_integration_mom(stack: np.ndarray, radii: np.ndarray, r1: int, ringsize
     selection_area = np.where( (radii<r1), stack, 0)
     #entries = np.where((radii<r1), 1, 0)
     max_mom = np.max(selection_area)
-
     return max_mom
 
 
@@ -395,7 +394,9 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
         for i in range(0,len(iterate)):
             qmap[i] = results[i]
 
-    return qmap, momentum_qaxis
+    qmap = qmap[:-1]*( momentum_qaxis[1:] - momentum_qaxis[:-1] )[:,np.newaxis]
+
+    return qmap, momentum_qaxis[:-1]
 
 
 def sigmoid(x: np.ndarray) -> np.ndarray:

@@ -3,8 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 data_obj = mreels.MomentumResolvedDataStack('n-inse_C1_EFTEM-SI-004 [-3,36] eV.dm4')
-qmap = np.load('line_1_GKGK_qmap.npy')
-qaxis = np.load('line_1_GKGK_qaxis.npy')
+qmap = np.load('line_1_GKGK_qmap_alt.npy')
+qaxis = np.load('line_1_GKGK_qaxis_alt.npy')
 #qmap = mreels.sigmoid(qmap)
 #mreels.plot_qeels_data(data_obj, qmap, qaxis, '..')
 
@@ -54,5 +54,5 @@ ax[1].set_xlabel(r'$q_y$ [$nm^{-1}$]')
 ax[1].set_ylabel(r'$q_x$ [$nm^{-1}$]')
 
 
-fig.savefig('_plot_q[{min_q:.2f}_{max_q:.2f}].pdf'.format(min_q=min_q, max_q=max_q), format='pdf')
+fig.savefig('IdQ integration', format='pdf')
 plt.show()
