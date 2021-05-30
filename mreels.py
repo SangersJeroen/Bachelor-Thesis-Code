@@ -591,6 +591,14 @@ class MomentumResolvedDataStack:
 
         self.pref_frame = pref_frame
 
+    def rem_neg_el(self):
+        if self.pref_frame == None:
+            raise ValueError("preferred frame must be set for the building of the axis")
+        self.build_axes()
+        mask = np.where(self.axis0 <= 0, False, True)
+        self.axis0 = self.axis0[mask]
+        self.stack = self.stack[mask,:,:]
+
     def get_centre(self, index: int) -> tuple:
         slice = self.stack[index]
         (y_centre, x_centre) = np.argwhere(slice==slice.max())[0]
