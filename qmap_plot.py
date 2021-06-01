@@ -3,8 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 data_obj = mreels.MomentumResolvedDataStack('n-inse_C1_EFTEM-SI-004 [-3,36] eV.dm4')
-qmap = np.load('line_1_GKGK_qmap_alt.npy')
-qaxis = np.load('line_1_GKGK_qaxis_alt.npy')
+qmap = np.load('slice_1_GKGK_qmap_alt.npy')
+qaxis = np.load('slice_1_gkgk_qaxis_alt.npy')
 #qmap = mreels.sigmoid(qmap)
 #mreels.plot_qeels_data(data_obj, qmap, qaxis, '..')
 
@@ -54,5 +54,5 @@ ax[1].set_xlabel(r'$q_y$ [$nm^{-1}$]')
 ax[1].set_ylabel(r'$q_x$ [$nm^{-1}$]')
 
 
-fig.savefig('IdQ integration', format='pdf')
+fig.savefig('I slicing', format='pdf')
 plt.show()

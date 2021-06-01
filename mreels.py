@@ -1,8 +1,8 @@
 from logging import error
+from os import path
 from typing import Tuple
 from ncempy import io
 import numpy as np
-from numpy.lib.function_base import gradient
 import scipy.fftpack as sfft
 from scipy.signal import convolve2d as cv2
 from tqdm import tqdm
@@ -427,6 +427,23 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
     return qmap, momentum_qaxis
 
 
+def get_qeels_slice(data_stack: object, point: tuple) -> np.ndarray:
+    centre = data_stack.get_centre(data_stack.pref_frame)
+    yp, xp = point
+    path_length = int(np.hypot(xp-centre[1], yp-centre[0]))
+    xsamp = np.linspace(centre[1], xp, path_length)
+    ysamp = np.linspace(centre[0], yp, path_length)
+    qmap = data_stack.stack[:,ysamp.astype(int),xsamp.astype(int)].T
+
+    qaxis = np.zeros(int(path_length))
+    data_stack.build_axes()
+    mom_y, mom_x = np.meshgrid(data_stack.axis1, data_stack.axis2)
+    mom_map = np.sqrt(mom_y**2 + mom_x**2)
+    qaxis = mom_map[xsamp.astype(int), ysamp.astype(int)]
+
+    return qmap, qaxis
+
+
 def sigmoid(x: np.ndarray) -> np.ndarray:
     avg = np.average(x)
     std = np.std(x)
@@ -628,6 +645,9 @@ class MomentumResolvedDataStack:
         self.stack = self.stack[mask,:,:]
 
     def get_centre(self, index: int) -> tuple:
+        if index == None:
+            index = self.pref_frame
+
         slice = self.stack[index]
         (y_centre, x_centre) = np.argwhere(slice==slice.max())[0]
         self.centre = (y_centre, x_centre)

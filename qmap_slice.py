@@ -3,8 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 data_obj = mreels.MomentumResolvedDataStack('n-inse_C1_EFTEM-SI-004 [-3,36] eV.dm4')
-qmap = np.load('line_1_GKGK_qmap.npy')
-qaxis = np.load('line_1_GKGK_qaxis.npy')
+qmap = np.load('slice_1_GKGK_qmap_alt.npy')
+qaxis = np.load('slice_1_GKGK_qaxis_alt.npy')
 #qmap = mreels.sigmoid(qmap)
 #mreels.plot_qeels_data(data_obj, qmap, qaxis, '..')
 
@@ -35,7 +35,7 @@ centre = data_obj.get_centre(25)
 my, mx = (1071-471)/2+471, (1023-533)/2+533
 disty, distx = my-centre[0], mx-centre[1]
 
-upper = 800
+upper = 500
 lower = 80
 
 iterate = range(lower,upper,25)
@@ -48,4 +48,5 @@ for i in iterate:
     ax[1].plot(data_obj.axis0, qmap[i], color=str(color))
     ax[1].axhline(np.min(qmap[i]))
 
+plt.savefig('I slicing line plots', format='pdf')
 plt.show()
