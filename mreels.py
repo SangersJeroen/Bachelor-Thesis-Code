@@ -441,7 +441,24 @@ def get_qeels_slice(data_stack: object, point: tuple) -> np.ndarray:
     mom_map = np.sqrt(mom_y**2 + mom_x**2)
     qaxis = mom_map[xsamp.astype(int), ysamp.astype(int)]
 
-    return qmap, qaxis
+    double_entries = np.asarray([])
+    for i in range(0,len(qaxis)-1):
+        if qaxis[i] == qaxis[i+1]:
+            double_entries = np.append(double_entries, i)
+
+    qaxis_sc = np.asarray([])
+    qmap_sc = np.asarray([])
+    for i in range(len(qaxis)):
+        if i not in double_entries:
+            qaxis_sc = np.append(qaxis_sc, qaxis[i])
+            qmap_sc = np.append(qmap_sc, qmap[i])
+    """ else:
+            qm_avg = (qmap[i]+qmap[i+1])/2
+            qaxis_sc = np.append(qaxis_sc, qaxis[i])
+            qmap_sc = np.append(qmap_sc, qmap[i])
+    """
+    qmap_sc = qmap_sc.reshape((len(qaxis_sc), qmap.shape[1]))
+    return qmap_sc, qaxis_sc
 
 
 def sigmoid(x: np.ndarray) -> np.ndarray:
