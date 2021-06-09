@@ -1,3 +1,4 @@
+from scipy.optimize import curve_fit as cv
 from logging import error
 from os import path
 from typing import Tuple
@@ -427,8 +428,14 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
     return qmap, momentum_qaxis
 
 
-def get_qeels_slice(data_stack: object, point: tuple) -> np.ndarray:
-    centre = data_stack.get_centre(data_stack.pref_frame)
+def get_qeels_slice(data_stack: object, point: tuple,
+                    use_k_axis=False, starting_point=None) -> np.ndarray:
+    if starting_point == None:
+        centre = data_stack.get_centre(data_stack.pref_frame)
+    else:
+        centre = starting_point
+
+
     yp, xp = point
     path_length = int(np.hypot(xp-centre[1], yp-centre[0]))
     xsamp = np.linspace(centre[1], xp, path_length)
@@ -439,11 +446,13 @@ def get_qeels_slice(data_stack: object, point: tuple) -> np.ndarray:
     data_stack.build_axes()
 
 
-    if data_stack.naxis0 == None:
+    if use_k_axis == False:
         mom_y, mom_x = np.meshgrid(data_stack.axis1, data_stack.axis2)
         mom_map = np.sqrt(mom_y**2 + mom_x**2)
         qaxis = mom_map[xsamp.astype(int), ysamp.astype(int)]
     else:
+        if data_stack.naxis0 == None:
+            raise ValueError('The transformed axes are not build, use transform_axis()')
         k_y, k_x = np.meshgrid(data_stack.naxis1, data_stack.naxis2)
         kmap = np.sqrt(k_x**2 + k_y**2)
         qaxis = kmap[xsamp.astype(int), ysamp.astype(int)]
@@ -469,11 +478,16 @@ def get_qeels_slice(data_stack: object, point: tuple) -> np.ndarray:
     return qmap_sc, qaxis_sc
 
 
-def sigmoid(x: np.ndarray) -> np.ndarray:
-    avg = np.average(x)
-    std = np.std(x)
-    return 1/(1+np.exp(-(x-avg)/std))
-
+def sigmoid(x: np.ndarray, borders=None) -> np.ndarray:
+    if borders == None:
+        avg = np.average(x)
+        std = np.std(x)
+        im = 1/(1+np.exp(-(x-avg)/std))
+    else:
+        avg = np.average(x[borders[0]:borders[1], :])
+        std = np.std(x[borders[0]:borders[1], :])
+        im = 1/(1+np.exp(-(x-avg)/std))
+    return im
 
 def plot_qeels_data(mr_data: object, intensity_qmap: np.ndarray,
                     momentum_qaxis: np.ndarray, prefix: str) -> None:
@@ -527,6 +541,7 @@ def angle_map(setup: object) -> np.ndarray:
 
 def scat_prob_differential(qmap: np.ndarray, qaxis: np.ndarray,
                            eaxis: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    qmap = qmap / np.sum(qmap)
     dE = np.gradient(qmap, eaxis, axis=1)
     dEdQ = np.gradient(dE, qaxis, axis=0)
     dEdQdQ = np.gradient(dEdQ, qaxis, axis=0)
@@ -540,18 +555,28 @@ def create_guess(error_map: np.ndarray, old_guess: np.ndarray) -> np.ndarray:
     return guess
 
 
-def dif_guesser(scat_prob: np.ndarray, KrogerTerms: object, omega: float):
+def dif_guesser(scat_prob: np.ndarray, KrogerTerms: object,
+                omega: np.ndarray, kperp: np.ndarray, start_mag=0.1):
     goal = np.copy(scat_prob)
-    guess = np.random.rand(0,1,scat_prob.shape)
-    guess_terms = KrogerTerms.update_terms(guess, omega, kperp)
+    guess = np.random.rand(scat_prob.shape[0],scat_prob.shape[1])*start_mag
+    KrogerTerms.update_terms(guess, omega, kperp)
 
-    if KrogerTerms.a or KrogerTerms.e0 == None:
+    if KrogerTerms.a == None or  KrogerTerms.e0 == None:
         raise RuntimeError('Supply the function with an already initialised KrogerTerms object')
 
     abs_error = 10
-    while abs_error > 1:
-        #outcome = KrogerTerms.
-        pass
+    iterations = 0
+    errors = np.asarray([])
+    while abs_error > 1e-32:
+        outcome = KrogerTerms.get_kroger(guess, omega, kperp)
+        err = error_map(goal, outcome)
+        abs_error =np.sum( np.abs(err) )
+        errors = np.append(errors, abs_error)
+        guess -= err*1e35
+        KrogerTerms.update_terms(guess, omega, kperp)
+        iterations += 1
+        print(iterations, abs_error)
+    return guess, iterations, errors
 
 
 
@@ -696,9 +721,16 @@ class MomentumResolvedDataStack:
         if self.pref_frame == None:
             raise ValueError("preferred frame must be set for the building of the axis")
         self.build_axes()
-        mask = np.where(self.axis0 <= 0, False, True)
+        mask = np.where(self.axis0 < 0, False, True)
         self.axis0 = self.axis0[mask]
+        self.axis_0_steps = np.sum(mask)
+        self.axis_0_origin = self.axis0.min()
+        self.axis_0_end = self.axis0.max()
         self.stack = self.stack[mask,:,:]
+
+    def remove_neg_val(self):
+        mask = np.where(self.stack < 0, True, False)
+        self.stack[mask] = 0
 
     def get_centre(self, index: int) -> tuple:
         if index == None:
@@ -754,6 +786,27 @@ class MomentumResolvedDataStack:
         self.stack_corrected = None
         stack_copy = None
 
+
+    def remove_zlp(self, threads=2):
+        def function(e, a, b, c):
+            return a*np.exp(-(e-b)**2 / c**2)
+
+        def zlp_x(i):
+            for j in tqdm(range(len(self.axis2)), desc=str(i), total=2048):
+                tmp = self.stack[:,i,j]
+                fit_to = tmp[mask]
+                try:
+                    opt, pcov = cv(function, self.axis0[mask], fit_to)
+                    #plt.plot(self.axis0 ,function(self.axis0, *opt)); plt.show()
+                    self.stack[:, i, j] - function(self.axis0, *opt)
+                except:
+                    self.stack[:, i, j]
+
+        mask = self.axis0 <= 3
+
+        with ThreadPoolExecutor(threads) as ex:
+            for i in range(len(self.axis1)):
+                ex.submit(zlp_x, i)
 
 class ImagingSetup:
     def __init__(self, filename: str ) -> None:
