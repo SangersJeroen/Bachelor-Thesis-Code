@@ -232,7 +232,7 @@ def momentum_trans_map(angle_map, dE, E0, e_k):
     return np.sqrt(mom_trans_par**2 + mom_trans_per**2)
 
 
-def radial_integration(frame, radii, r1, r0=0, ringsize=5):
+def radial_integration(r1, frame, radii, r0=0):
     """Performs radial integration of the slice from slice_centre outwards.
     sums all values where the distance of those values is greater than r0 and inbetween r1 and r1-ringsize.
     Parameters
@@ -253,12 +253,10 @@ def radial_integration(frame, radii, r1, r0=0, ringsize=5):
         value of the sum over the integration area
     """
 
-    integration_area0 = np.where( radii>r0, frame, 0)
-    integration_area = np.where( radii<r1, integration_area0, 0)
+    integration_area = np.where( radii<r1, frame, 0)
     #integration_area = np.where( radii>(r1-ringsize), integration_area1, 0)
 
-    entries0 = np.where( radii>r0, 1, 0)
-    entries = np.where( radii<r1, entries0, 0)
+    entries = np.where( radii<r1, 1, 0)
     #entries = np.where( radii>(r1-ringsize), entries1, 0)
     integral = np.sum(integration_area) / np.sum(entries)
 
@@ -318,7 +316,7 @@ def line_integration_int(radius: int, stack: np.ndarray, radii: np.ndarray) -> n
 
 def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_frame: int,
                    forward_peak=None, method='radial',
-                   r0=0, threads=2) -> Tuple[np.ndarray,np.ndarray]:
+                   threads=2) -> Tuple[np.ndarray,np.ndarray]:
     #stop counting negative energy values
     (esize, ysize, xsize) = mr_data_stack.stack.shape
     momentum_qaxis = np.array([])
@@ -335,10 +333,9 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
     x = (np.arange(xsize)-ysize/2)+0.5
     X, Y = np.meshgrid(y, x)
     radii = np.sqrt( (X-offset_x)**2 + (Y-offset_y)**2 )
-    radii3d = np.broadcast_to(radii, mr_data_stack.stack.shape).astype('float32')
     #zeros = np.zeros((mr_data_stack.stack.shape), dtype=np.float32)
     #ones = np.ones((mr_data_stack.stack.shape), dtype=np.float32)
-
+    r0 = 0
     qmap = None
 
     if method == 'radial':
@@ -348,18 +345,25 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
         iterate = range( r0, r1, ringsize)
         qmap = np.zeros((len(iterate), esize))
         for i in tqdm(iterate):
-            momentum_frame_total = radial_integration(momentum_map, radii, i, r0, ringsize)
+            momentum_frame_total = radial_integration(i, momentum_map, radii, r0)
             momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
-        radii = None
-        with ThreadPoolExecutor(threads) as ex:
-            def part_func(r):
-                args = (mr_data_stack.stack, radii3d, r0*1.0, ringsize*1.0)
-                return radial_integration_stack(r, *args)
-            r = [i for i in range(r0, r1, ringsize)]
-            results = list(tqdm(ex.map(part_func, r), total=len(r)))
 
-        for i in range(0,len(iterate)):
-            qmap[i] = results[i]
+        rs = [i for i in range(r0,r1,ringsize)]
+        energies = [ei for ei in range(0, len(mr_data_stack.axis0))]
+
+        def part_func(ei):
+            args = (mr_data_stack.stack[ei], radii)
+            tr = np.zeros(len(rs))
+            for r in range(len(rs)):
+                tr[r] = radial_integration(rs[r], *args)
+            return tr
+
+        with ThreadPoolExecutor(threads) as ex:
+            results = list(tqdm(ex.map(part_func, energies),
+                                desc="Radial integration", total=len(energies)))
+
+        for i in range(0, len(energies)):
+            qmap[:,i] = results[i]
 
 
     elif method == 'line':
@@ -582,6 +586,49 @@ def dif_guesser(scat_prob: np.ndarray, KrogerTerms: object,
 
 def error_map(target: np.ndarray, attempt: np.ndarray) -> np.ndarray:
     return target - attempt
+
+
+def batson_correct(eels_obj: object, energy_window: int, qmap: np.ndarray):
+    eels_obj.build_axes()
+
+    area = eels_obj.axis_1_steps*eels_obj.axis_2_steps
+    image_spectrum = np.sum(eels_obj.stack, axis=(2,1))/area
+    image_spectrum[image_spectrum <= 0] = 0
+
+    def integrate_window_fp(slice, energy_window):
+        slice_max = np.argwhere(slice == slice.max())[0][0]
+        half_window_len = int(energy_window /2 /eels_obj.axis_0_scale)
+        lower_bound = slice_max - half_window_len
+        upper_bound = slice_max + half_window_len
+        if lower_bound < eels_obj.axis0.min():
+            lower_bound = eels_obj.axis0.min()
+        if upper_bound > eels_obj.axis0.max():
+            upper_bound = eels_obj.axis0.max()
+        integral = np.sum(slice[lower_bound:upper_bound])
+        return integral
+
+    im_spec_int = integrate_window_fp(image_spectrum, energy_window)
+    im_spec_max_index = np.argwhere(image_spectrum == image_spectrum.max())[0][0]
+    batson_map = np.copy(qmap)
+
+    for i in range(1, qmap.shape[0]):
+        slice = qmap[i]
+        slice_int = integrate_window_fp(slice, energy_window)
+        norm_im_spec = np.copy(image_spectrum)
+        norm_im_spec *= slice_int/im_spec_int
+        peakshift = im_spec_max_index - np.argwhere(slice == slice.max())[0][0]
+        if peakshift > 0:
+            slice[0:qmap.shape[1]-peakshift] -= norm_im_spec[0:qmap.shape[1]-peakshift]
+        elif peakshift < 0:
+            slice[-peakshift:qmap.shape[1]] -= norm_im_spec[-peakshift:qmap.shape[1]]
+        else:
+            slice -= norm_im_spec
+        batson_map[i] = slice
+
+    return batson_map
+
+
+
 
 
 class KrogerTerms:
