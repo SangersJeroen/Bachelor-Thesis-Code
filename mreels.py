@@ -157,7 +157,7 @@ def get_peak_width(frame: np.ndarray, tr_centre: tuple) -> int:
         Width of the peak
     """
     trace = frame[tr_centre[0],tr_centre[1]:tr_centre[1]+100]
-    width = np.argwhere( trace<(frame[tr_centre[0],tr_centre[1]]/15))[0]
+    width = np.argwhere( trace<(frame[tr_centre[0],tr_centre[1]]/3))[0]
     return width
 
 
@@ -360,12 +360,12 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
     momentum_qaxis = np.array([])
 
     mr_data_stack.build_axes()
-    mom_y, mom_x = np.meshgrid(mr_data_stack.axis1, mr_data_stack.axis2)
+    mom_y, mom_x = np.meshgrid(mr_data_stack.axis2, mr_data_stack.axis1)
     momentum_map = np.sqrt(mom_y**2 + mom_x**2)
 
     stack_centre = mr_data_stack.get_centre(preferred_frame)
 
-    stack_centre = (stack_centre[1], stack_centre[0])
+    #stack_centre = (stack_centre[1], stack_centre[0])
 
     offset_y = stack_centre[0]-int(ysize/2)
     offset_x = stack_centre[1]-int(xsize/2)
@@ -384,7 +384,7 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
 
         iterate = range( r0, r1, ringsize)
         qmap = np.zeros((len(iterate), esize))
-        for i in tqdm(iterate):
+        for i in tqdm(iterate, desc='Momentum axis'):
             momentum_frame_total = radial_integration(i, momentum_map, radii, r0)
             momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
 
@@ -424,7 +424,7 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
 
         iterate = range( r0, r1, ringsize)
         qmap = np.zeros((len(iterate), esize))
-        for i in tqdm(iterate):
+        for i in tqdm(iterate, desc="Momentum axis"):
             momentum_frame_total = line_integration_mom(momentum_map, radii, i, ringsize)
             momentum_qaxis = np.append(momentum_qaxis, momentum_frame_total)
 
@@ -469,7 +469,7 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
         for i in range(0, len(energies)):
             qmap[:,i] = results[i]
 
-    return qmap, momentum_qaxis
+    return qmap[1:], momentum_qaxis[1:]
 
 
 def get_qeels_slice(data_stack: object, point: tuple,
@@ -700,7 +700,7 @@ def batson_correct(eels_obj: object, energy_window: int, qmap: np.ndarray):
 
     idx = np.zeros(qmap.shape[0])
     for i in range(0, qmap.shape[0]):
-        msk = np.sum(np.where(np.isnan(qmap[i]) | qmap[0].all() == 0, False, True))
+        msk = np.sum(np.where(np.isnan(qmap[i]) | qmap[i].all() == 0, False, True))
         idx[i] = msk
 
     start = np.argwhere(idx)[0][0]
