@@ -302,7 +302,7 @@ def line_integration_mom(stack: np.ndarray, radii: np.ndarray, r1: int, ringsize
     return max_mom
 
 
-def line_integration_int(radius: int, stack: np.ndarray, radii: np.ndarray) -> np.ndarray:
+def line_integration_int(radius: int, stack: np.ndarray, radii: np.ndarray, ringsize) -> np.ndarray:
     """Integrates along a circle segment from where radii is zero to where radii is radius,
     Uses radii as a mask for selecting the values from stack. Averages EELS spectra at a radius and returns this averaged spectrum
 
@@ -320,8 +320,8 @@ def line_integration_int(radius: int, stack: np.ndarray, radii: np.ndarray) -> n
     np.ndarray
         The averaged EELS spectrum
     """
-    integration_area = np.where(radii<radius, stack, 0)
-    entries = np.where((radii<radius), 1, 0)
+    integration_area = np.where((radii<radius) & (radii > radius-ringsize), stack, 0)
+    entries = np.where(integration_area > 0, 1, 0)
     integral = np.sum(integration_area)/np.sum(entries)
     return integral
 
@@ -454,7 +454,7 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
                 stack = stack[:, stack_centre[0]:, stack_centre[1]:]
 
         def part_func(e_index):
-            args = (stack[e_index], radii)
+            args = (stack[e_index], radii, ringsize)
             to_return = np.zeros(len(rs))
             for r in range(len(rs)):
                 to_return[r] = line_integration_int(rs[r], *args)
@@ -772,17 +772,19 @@ def find_peak_in_range(qmap: np.ndarray, centre: int, window_size: int) -> Tuple
         peak position and error in peak position
     """
     half_size = window_size // 2
-    search_field = qmap*0
-    search_field[:, centre-half_size:centre+half_size] = qmap[:, centre-half_size:centre+half_size]
+    search_field = qmap
+    #search_field[:, centre-half_size:centre+half_size] = qmap[:, centre-half_size:centre+half_size]
     search_field[np.isnan(search_field)] = 0
+    search_slice = np.zeros(len(qmap[0]))
 
     ppos = np.array([], dtype='int')
     perr = np.array([])
     for i in range(0,len(search_field[:,0])):
-        search_slice = search_field[i]
+        search_slice[centre-half_size:centre+half_size] = search_field[i, centre-half_size:centre+half_size]
         tmp = np.argwhere(search_slice==search_slice.max())
         perr = np.append(perr, np.std(tmp))
-        ppos = np.append(ppos, int(np.average(tmp)))
+        ppos = np.append(ppos, tmp[0][0])
+        #centre = int(ppos[i])
 
     return ppos, perr
 

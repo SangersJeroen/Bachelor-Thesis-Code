@@ -12,7 +12,7 @@ if __name__ == '__main__':
     eels_stack.build_axes()
     eels_stack.rem_neg_el()
     eels_stack.remove_neg_val()
-    eels_stack.correct_drift()
+    #eels_stack.correct_drift()
     #eels_stack.stack = np.load('no_zlp_stack.npy')
     #qmap_m, qaxis_m = mreels.get_qeels_data(eels_stack, 300, 1, 25, threads=8)
     #qmap_m, qaxis_m = mreels.get_qeels_data(eels_stack, 750, 1, 25, (627,953), 'line', threads=12)
@@ -28,7 +28,7 @@ if __name__ == '__main__':
     peak = 15
     window = 20
 
-    qmap_m, qaxis_m = mreels.pool_qmap(bat_map, qaxis_m, 4)
+    qmap_m, qaxis_m = mreels.pool_qmap(bat_map, qaxis_m, 2)
 
     ppos_m, perr_m = mreels.find_peak_in_range(qmap_m, np.argwhere(eax==peak)[0][0], window)
     ppos_1, perr_1 = mreels.find_peak_in_range(qmap_m, np.argwhere(eax==22)[0][0], 8)

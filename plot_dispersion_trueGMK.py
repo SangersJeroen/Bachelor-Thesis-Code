@@ -3,10 +3,10 @@ import mreels
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
-string = '000-+a101 '
-
 mpl.rcParams['figure.dpi'] = 100
-mpl.rcParams["legend.loc"] = "center right"
+mpl.rcParams["legend.loc"] = "center"
+
+string = '000-+a101 '
 
 if __name__ == '__main__':
     eels_stack = mreels.MomentumResolvedDataStack('n-inse_C1_EFTEM-SI-004 [-3,36] eV.dm4', 25)
@@ -14,17 +14,12 @@ if __name__ == '__main__':
     eels_stack.build_axes()
     eels_stack.rem_neg_el()
     eels_stack.remove_neg_val()
-    #eels_stack.correct_drift()
+    eels_stack.correct_drift()
     #eels_stack.stack = np.load('no_zlp_stack.npy')
     #qmap, qaxis = mreels.get_qeels_data(eels_stack, 750, 1, 25, threads=8)
     #qmap, qaxis = mreels.get_qeels_data(eels_stack, window00, 1, 25, (992,812), 'line', threads=12)
-    qmap, qaxis = mreels.get_qeels_slice(eels_stack, (777, 1373))
-    qmap1, qaxis1 = mreels.get_qeels_slice(eels_stack, (778, 1373))
-    qmap2, qaxis2 = mreels.get_qeels_slice(eels_stack, (776, 1373))
-    qmap3, qaxis3 = mreels.get_qeels_slice(eels_stack, (777, 1374))
-    qmap4, qaxis4 = mreels.get_qeels_slice(eels_stack, (777, 1372))
-    qmap = qmap + qmap1 + qmap2 + qmap3 + qmap4
-    qaxis = qaxis + qaxis1 + qaxis2 + qaxis3 + qaxis4
+    qmap_m, qaxis_m = mreels.get_qeels_slice(eels_stack, (924, 1198))
+    qmap_k, qaxis_k = mreels.get_qeels_slice(eels_stack, (825, 1117), starting_point=(924, 1198))
     #qmap1, qaxis1 = mreels.get_qeels_slice(eels_stack, (1113, 766), starting_point=(992, 812))
     #np.save('no_zlp_stack.npy', eels_stack.stack)
     #print(qmap0.shape)
@@ -43,32 +38,34 @@ if __name__ == '__main__':
     #qmap = np.load(string+'qmap.npy')
     #qaxis = np.load(string+'qaxis.npy')
 
+    qmap = np.append(qmap_m, qmap_k[1:], axis=0)
+    qaxis = np.append(qaxis_m, qaxis_k[1:])
 
-    #mreels.plot_qeels_data(eels_stack, mreels.sigmoid(qmap, (100, 150)), qaxis, string+" ")
+    mreels.plot_qeels_data(eels_stack, mreels.sigmoid(qmap, (20, 150)), qaxis, string+" ")
     #mreels.plot_qeels_data(eels_stack, mreels.sigmoid(qmap_m, (50, 150)), qaxis_m, string+" ")
 
     #np.save('test fp ' +'batson.npy', batson_map)
 
-
-    peak = 14
-    window = 24
+    peak = 15
+    window = 14
 
     qmap, qaxis = mreels.pool_qmap(qmap, qaxis, 2)
 
-    peak1 = 28
-    window1 = 14
+    peak1 = 7.5
+    window1 = 6
 
     peak2 = 22
     window2 = 10
 
-    peak3 = 25
-    window3 = 10
+    peak3 = 3.5
+    window3 = 8
 
-    peak4 = 3.5
+    peak4 = 27
     window4 = 6
 
-    peak5 = 7.5
-    window5 = 6
+    peak5 = 25
+    window5 = 8
+
 
     ppos, perr = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak)[0][0], window)
     ppos1, perr1 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak1)[0][0], window1)
@@ -78,16 +75,18 @@ if __name__ == '__main__':
     ppos5, perr5 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak5)[0][0], window5)
 
     plt.errorbar(qaxis, eax[ppos], yerr=perr*0.25, fmt='+', label=r'~15$eV$', color='blue')
-    plt.errorbar(qaxis, eax[ppos1], yerr=perr1*0.25, fmt='+', label=r'~27$eV$', color='red')
+    plt.errorbar(qaxis, eax[ppos1], yerr=perr1*0.25, fmt='+', label=r'~7.5$eV$', color='red')
     plt.errorbar(qaxis, eax[ppos2], yerr=perr2*0.25, fmt='+', label=r'~22$eV$', color='green')
-    plt.errorbar(qaxis, eax[ppos3], yerr=perr3*0.25, fmt='+', label=r'~25$eV$', color='orange')
-    plt.errorbar(qaxis, eax[ppos4], yerr=perr4*0.25, fmt='+', label=r'~3.5$eV$', color='gray')
-    plt.errorbar(qaxis, eax[ppos5], yerr=perr5*0.25, fmt='+', label=r'~7.5$eV$', color='black')
+    plt.errorbar(qaxis, eax[ppos3], yerr=perr3*0.25, fmt='+', label=r'~3.5$eV$', color='orange')
+    plt.errorbar(qaxis, eax[ppos4], yerr=perr4*0.25, fmt='+', label=r'~27$eV$', color='gray')
+    plt.errorbar(qaxis, eax[ppos5], yerr=perr5*0.25, fmt='+', label=r'~25$eV$', color='black')
 
-    plt.xlim([-0.1,1])
-    plt.ylim([0,18])
+    #plt.gcf().set_size_inches()
+
+    plt.xlim([-0.1,qaxis.max()+0.2])
+    plt.ylim([1,30])
     plt.xlabel(r'$q$ [$nm^{-1}$]')
     plt.ylabel(r'$\Delta eV$ [$eV$]')
-    plt.title(r'Tracked peaks in $\Gamma \rightarrow [\overline{1} 1 \overline{2}]$')
+    plt.title(r'Tracked peaks in $\Gamma \rightarrow K \rightarrow M$')
     plt.legend()
     plt.show()

@@ -2,7 +2,7 @@ import numpy as np
 from scipy.fftpack import next_fast_len
 
 
-def deconvolute(eels_obj, spec):
+def deconvolute(eels_obj, spec, zlp):
 
     y = spec
     r = 3  # Drude model, can also use estimation from exp. data
@@ -21,7 +21,7 @@ def deconvolute(eels_obj, spec):
 
     x_extrp = np.linspace(deltaE[0], sem_inf * ddeltaE + deltaE[0], sem_inf)
 
-    y_ZLP_extrp[:l] = spec
+    y_ZLP_extrp[:l] = zlp
     y_ZLP_extrp[int(2/0.25):l] = 0
     y_extrp[:l] = y
     x_extrp[:l] = deltaE[::-1]
