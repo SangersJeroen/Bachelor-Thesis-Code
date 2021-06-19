@@ -19,12 +19,6 @@ if __name__ == '__main__':
     #qmap, qaxis = mreels.get_qeels_data(eels_stack, 750, 1, 25, threads=8)
     #qmap, qaxis = mreels.get_qeels_data(eels_stack, window00, 1, 25, (992,812), 'line', threads=12)
     qmap, qaxis = mreels.get_qeels_slice(eels_stack, (777, 1373))
-    qmap1, qaxis1 = mreels.get_qeels_slice(eels_stack, (778, 1373))
-    qmap2, qaxis2 = mreels.get_qeels_slice(eels_stack, (776, 1373))
-    qmap3, qaxis3 = mreels.get_qeels_slice(eels_stack, (777, 1374))
-    qmap4, qaxis4 = mreels.get_qeels_slice(eels_stack, (777, 1372))
-    qmap = qmap + qmap1 + qmap2 + qmap3 + qmap4
-    qaxis = qaxis + qaxis1 + qaxis2 + qaxis3 + qaxis4
     #qmap1, qaxis1 = mreels.get_qeels_slice(eels_stack, (1113, 766), starting_point=(992, 812))
     #np.save('no_zlp_stack.npy', eels_stack.stack)
     #print(qmap0.shape)
@@ -51,18 +45,18 @@ if __name__ == '__main__':
 
 
     peak = 14
-    window = 24
+    window = 6
 
     qmap, qaxis = mreels.pool_qmap(qmap, qaxis, 2)
 
     peak1 = 28
-    window1 = 14
+    window1 = 4
 
     peak2 = 22
-    window2 = 10
+    window2 = 4
 
     peak3 = 25
-    window3 = 10
+    window3 = 4
 
     peak4 = 3.5
     window4 = 6
@@ -70,12 +64,12 @@ if __name__ == '__main__':
     peak5 = 7.5
     window5 = 6
 
-    ppos, perr = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak)[0][0], window)
-    ppos1, perr1 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak1)[0][0], window1)
-    ppos2, perr2 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak2)[0][0], window2)
-    ppos3, perr3 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak3)[0][0], window3)
-    ppos4, perr4 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak4)[0][0], window4)
-    ppos5, perr5 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak5)[0][0], window5)
+    ppos, perr = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak)[0][0], window, adaptive_range=True)
+    ppos1, perr1 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak1)[0][0], window1, adaptive_range=True)
+    ppos2, perr2 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak2)[0][0], window2, adaptive_range=True)
+    ppos3, perr3 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak3)[0][0], window3, adaptive_range=True)
+    ppos4, perr4 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak4)[0][0], window4, adaptive_range=True)
+    ppos5, perr5 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak5)[0][0], window5, adaptive_range=True)
 
     plt.errorbar(qaxis, eax[ppos], yerr=perr*0.25, fmt='+', label=r'~15$eV$', color='blue')
     plt.errorbar(qaxis, eax[ppos1], yerr=perr1*0.25, fmt='+', label=r'~27$eV$', color='red')

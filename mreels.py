@@ -5,6 +5,7 @@ from typing import Tuple
 from ncempy import io
 import numpy as np
 import scipy.fftpack as sfft
+from scipy.optimize.nonlin import LowRankMatrix
 from scipy.signal import convolve2d as cv2
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -320,7 +321,7 @@ def line_integration_int(radius: int, stack: np.ndarray, radii: np.ndarray, ring
     np.ndarray
         The averaged EELS spectrum
     """
-    integration_area = np.where((radii<radius) & (radii > radius-ringsize), stack, 0)
+    integration_area = np.where((radii<radius), stack, 0)
     entries = np.where(integration_area > 0, 1, 0)
     integral = np.sum(integration_area)/np.sum(entries)
     return integral
@@ -659,7 +660,7 @@ def angle_map(setup: object) -> np.ndarray:
     return angles
 
 
-def batson_correct(eels_obj: object, energy_window: int, qmap: np.ndarray):
+def batson_correct(eels_obj: object, energy_window: int, qmap: np.ndarray, imspec: np.ndarray=None):
     """Performs Batson correction on the QEELS data and returns the corrected QEELS data.
 
     Parameters
@@ -679,8 +680,11 @@ def batson_correct(eels_obj: object, energy_window: int, qmap: np.ndarray):
     eels_obj.build_axes()
 
     area = eels_obj.axis_1_steps*eels_obj.axis_2_steps
-    image_spectrum = np.sum(eels_obj.stack, axis=(2,1))/area
-    image_spectrum[image_spectrum <= 0] = 0
+    if imspec is not None:
+        image_spectrum = imspec
+    else:
+        image_spectrum = np.sum(eels_obj.stack, axis=(2,1))/area
+        image_spectrum[image_spectrum <= 0] = 0
 
     def integrate_window_fp(slice, energy_window):
         slice_max = np.argwhere(slice == slice.max())[0][0]
@@ -706,7 +710,7 @@ def batson_correct(eels_obj: object, energy_window: int, qmap: np.ndarray):
     start = np.argwhere(idx)[0][0]
 
     for i in range(start, qmap.shape[0]):
-        slice = qmap[i]
+        slice = batson_map[i]
         slice_int = integrate_window_fp(slice, energy_window)
         norm_im_spec = np.copy(image_spectrum)
         norm_im_spec *= slice_int/im_spec_int
@@ -753,7 +757,7 @@ def pool_qmap(qmap: np.ndarray, qaxis: np.ndarray, poolsize: int) -> Tuple[np.nd
     return pooled_qmap, pooled_qaxis
 
 
-def find_peak_in_range(qmap: np.ndarray, centre: int, window_size: int) -> Tuple[np.ndarray, np.ndarray]:
+def find_peak_in_range(qmap: np.ndarray, centre: int, window_size: int, adaptive_range: bool=False) -> Tuple[np.ndarray, np.ndarray]:
     """Tries to find peak in given range determined by windows_size/2 centered around centre, returns index of peak and error estimate.
     error is estimated as energy resolution multiplied by the standard deviation of the multiple peaks.
 
@@ -775,17 +779,26 @@ def find_peak_in_range(qmap: np.ndarray, centre: int, window_size: int) -> Tuple
     search_field = qmap
     #search_field[:, centre-half_size:centre+half_size] = qmap[:, centre-half_size:centre+half_size]
     search_field[np.isnan(search_field)] = 0
-    search_slice = np.zeros(len(qmap[0]))
 
     ppos = np.array([], dtype='int')
     perr = np.array([])
     for i in range(0,len(search_field[:,0])):
-        search_slice[centre-half_size:centre+half_size] = search_field[i, centre-half_size:centre+half_size]
-        tmp = np.argwhere(search_slice==search_slice.max())
-        perr = np.append(perr, np.std(tmp))
+        search_slice = np.zeros(len(qmap[0]))
+        low = centre-half_size
+        upp = centre+half_size
+        search_slice[low:upp] = search_field[i, low:upp]
+        tmp = np.argwhere(search_slice==np.max(search_slice))
+        perr = np.append(perr, 1/(tmp[0][0]-np.mean(search_slice)))
         ppos = np.append(ppos, tmp[0][0])
-        #centre = int(ppos[i])
 
+        if adaptive_range == True:
+            centre = int(tmp[0][0])
+
+        #plt.plot(qmap[i])
+        #plt.plot(ppos[i], qmap[i, ppos[i]], marker='1', markersize=5)
+        #wtf = True
+
+    #plt.show()
     return ppos, perr
 
 

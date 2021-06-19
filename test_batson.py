@@ -17,12 +17,19 @@ if __name__ == '__main__':
     #qmap_m, qaxis_m = mreels.get_qeels_data(eels_stack, 300, 1, 25, threads=8)
     #qmap_m, qaxis_m = mreels.get_qeels_data(eels_stack, 750, 1, 25, (627,953), 'line', threads=12)
     qmap_m, qaxis_m = mreels.get_qeels_slice(eels_stack, (992, 812))
+    #500:1000,620:900
+    imspec = np.sum(eels_stack.stack[:,700:1400,800:1300], axis=(2,1))
 
-    mreels.plot_qeels_data(eels_stack, sig(qmap_m, (50,100)), qaxis_m, " ")
+    mreels.plot_qeels_data(eels_stack, sig(qmap_m), qaxis_m, " ")
 
-    bat_map = mreels.batson_correct(eels_stack, 3, qmap_m)
+    bat_map = mreels.batson_correct(eels_stack, 3, qmap_m, imspec=imspec)
 
-    mreels.plot_qeels_data(eels_stack, sig(bat_map, (100,150)), qaxis_m, " ")
+    mreels.plot_qeels_data(eels_stack, sig(bat_map), qaxis_m, " ")
+
+
+
+    mreels.plot_qeels_data(eels_stack, sig(qmap_m), qaxis_m, " ")
+
     eax = eels_stack.axis0
 
     peak = 15

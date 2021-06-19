@@ -67,12 +67,12 @@ if __name__ == '__main__':
     window5 = 8
 
 
-    ppos, perr = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak)[0][0], window)
-    ppos1, perr1 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak1)[0][0], window1)
-    ppos2, perr2 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak2)[0][0], window2)
-    ppos3, perr3 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak3)[0][0], window3)
-    ppos4, perr4 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak4)[0][0], window4)
-    ppos5, perr5 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak5)[0][0], window5)
+    ppos, perr = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak)[0][0], window,adaptive_range=True)
+    ppos1, perr1 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak1)[0][0], window1,adaptive_range=True)
+    ppos2, perr2 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak2)[0][0], window2,adaptive_range=True)
+    ppos3, perr3 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak3)[0][0], window3,adaptive_range=True)
+    ppos4, perr4 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak4)[0][0], window4,adaptive_range=True)
+    ppos5, perr5 = mreels.find_peak_in_range(qmap, np.argwhere(eax==peak5)[0][0], window5,adaptive_range=True)
 
     plt.errorbar(qaxis, eax[ppos], yerr=perr*0.25, fmt='+', label=r'~15$eV$', color='blue')
     plt.errorbar(qaxis, eax[ppos1], yerr=perr1*0.25, fmt='+', label=r'~7.5$eV$', color='red')
