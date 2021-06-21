@@ -22,9 +22,9 @@ if __name__ == '__main__':
 
     mreels.plot_qeels_data(eels_stack, sig(qmap_m), qaxis_m, " ")
 
-    bat_map = mreels.batson_correct(eels_stack, 3, qmap_m, imspec=imspec)
+    bat_map = mreels.batson_correct(eels_stack, 6, qmap_m, imspec=imspec)
 
-    mreels.plot_qeels_data(eels_stack, sig(bat_map), qaxis_m, " ")
+    mreels.plot_qeels_data(eels_stack, sig(bat_map, (50, 150)), qaxis_m, " ")
 
 
 

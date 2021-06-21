@@ -330,7 +330,7 @@ def line_integration_int(radius: int, stack: np.ndarray, radii: np.ndarray, ring
 
 def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_frame: int,
                    forward_peak=None, method='radial',
-                   threads=2) -> Tuple[np.ndarray,np.ndarray]:
+                   threads=2, starting_point=None, peak_width=None) -> Tuple[np.ndarray,np.ndarray]:
     """Gets averaged/integrated EELS data per momenta and energy and returns this as a 2D array of size (M,E) with a corresponding 1D array of size (M) containing the corresponding momenta.
     E is the same size as the energy axis of the EFTEM stack.
 
@@ -364,7 +364,10 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
     mom_y, mom_x = np.meshgrid(mr_data_stack.axis2, mr_data_stack.axis1)
     momentum_map = np.sqrt(mom_y**2 + mom_x**2)
 
-    stack_centre = mr_data_stack.get_centre(preferred_frame)
+    if starting_point is None:
+        stack_centre = mr_data_stack.get_centre(preferred_frame)
+    else:
+        stack_centre = starting_point
 
     #stack_centre = (stack_centre[1], stack_centre[0])
 
@@ -408,13 +411,17 @@ def get_qeels_data(mr_data_stack: object, r1: int, ringsize: int, preferred_fram
 
 
     elif method == 'line':
-        if forward_peak == None:
+        if forward_peak is None:
             print('forward_peak required for line integration')
 
         true_fw_peak = get_true_centres(mr_data_stack.stack[preferred_frame],
-                                        ((forward_peak[0],forward_peak[1]),(forward_peak[0],forward_peak[1])), leeway=50)
-        peak_width = get_peak_width(mr_data_stack.stack[preferred_frame],
-                                    (true_fw_peak[0],true_fw_peak[1]))
+            ((forward_peak[0],forward_peak[1]),
+            (forward_peak[0],forward_peak[1])), leeway=50)
+
+        if peak_width is None:
+            peak_width = get_peak_width(mr_data_stack.stack[preferred_frame],
+                (true_fw_peak[0],true_fw_peak[1]))
+
         angles = np.arctan2((Y-offset_y),(X-offset_x))
         angle_to_centre = np.arctan2((true_fw_peak[0]-stack_centre[0]),(true_fw_peak[1]-stack_centre[1]))
 
@@ -679,12 +686,14 @@ def batson_correct(eels_obj: object, energy_window: int, qmap: np.ndarray, imspe
     """
     eels_obj.build_axes()
 
+    zlp_mask = np.where(
+        (eels_obj.axis0 >= eels_obj.axis0.min()) & (eels_obj.axis0 < 6), True, False)
+
     area = eels_obj.axis_1_steps*eels_obj.axis_2_steps
     if imspec is not None:
         image_spectrum = imspec
     else:
         image_spectrum = np.sum(eels_obj.stack, axis=(2,1))/area
-        image_spectrum[image_spectrum <= 0] = 0
 
     def integrate_window_fp(slice, energy_window):
         slice_max = np.argwhere(slice == slice.max())[0][0]
@@ -704,7 +713,9 @@ def batson_correct(eels_obj: object, energy_window: int, qmap: np.ndarray, imspe
 
     idx = np.zeros(qmap.shape[0])
     for i in range(0, qmap.shape[0]):
-        msk = np.sum(np.where(np.isnan(qmap[i]) | qmap[i].all() == 0, False, True))
+        msk = np.sum(
+            np.where(np.isnan(qmap[i]) | qmap[i].all() == 0, False, True)
+        )
         idx[i] = msk
 
     start = np.argwhere(idx)[0][0]
@@ -714,7 +725,8 @@ def batson_correct(eels_obj: object, energy_window: int, qmap: np.ndarray, imspe
         slice_int = integrate_window_fp(slice, energy_window)
         norm_im_spec = np.copy(image_spectrum)
         norm_im_spec *= slice_int/im_spec_int
-        peakshift = im_spec_max_index - np.argwhere(slice == slice.max())[0][0]
+        peakshift = im_spec_max_index - np.argwhere(
+            slice[zlp_mask] == slice[zlp_mask].max())[0][0]
         if peakshift > 0:
             slice[0:qmap.shape[1]-peakshift] -= norm_im_spec[0:qmap.shape[1]-peakshift]
         elif peakshift < 0:
