@@ -1,2 +1,0 @@
-Remove all values below a certain maximum intensity value.
-Optical properties indium selenide
